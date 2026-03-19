@@ -112,4 +112,19 @@ function mapCategory(tellerCategory, amount, description) {
 }
 
 const PORT = process.env.PORT || 3000;
+app.get("/debug-cert", (_, res) => {
+  const cert = process.env.TELLER_CERT || "";
+  res.json({
+    certLength: cert.length,
+    hasNewlines: cert.includes("\n"),
+    hasLiteralSlashN: cert.includes("\\n"),
+    first50: cert.substring(0, 50),
+    last50: cert.substring(cert.length - 50),
+  });
+});
+```
+
+After Railway redeploys, visit:
+```
+https://personal-finance-production-8d38.up.railway.app/debug-cert
 app.listen(PORT, () => console.log(`Teller proxy running on port ${PORT}`));

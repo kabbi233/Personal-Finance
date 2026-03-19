@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from "react";
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const TELLER_APP_ID = "app_pq1oddda2fceiqaqk6000";
 // After you deploy to Railway, replace this with your Railway URL:
-const BACKEND_URL = "https://YOUR-RAILWAY-URL.railway.app";
+const BACKEND_URL = "personal-finance-production-8d38.up.railway.app";
 // ──────────────────────────────────────────────────────────────────────────────
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];

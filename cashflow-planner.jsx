@@ -1,0 +1,397 @@
+import { useState, useMemo, useEffect } from "react";
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const TELLER_APP_ID = "app_pq1oddda2fceiqaqk6000";
+// After you deploy to Railway, replace this with your Railway URL:
+const BACKEND_URL = "https://YOUR-RAILWAY-URL.railway.app";
+// ──────────────────────────────────────────────────────────────────────────────
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const today = new Date();
+const currentMonth = today.getMonth();
+const currentYear = today.getFullYear();
+
+function getMonthsAhead(n) {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(currentYear, currentMonth + i, 1);
+    return { label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, month: d.getMonth(), year: d.getFullYear() };
+  });
+}
+
+function amountForMonth(item, month, year) {
+  const start = new Date(item.startDate);
+  if (start.getFullYear() > year || (start.getFullYear() === year && start.getMonth() > month)) return 0;
+  if (item.frequency === "once") return start.getMonth() === month && start.getFullYear() === year ? item.amount : 0;
+  if (item.frequency === "weekly") return item.amount * 4.33;
+  if (item.frequency === "biweekly") return item.amount * 2.17;
+  return item.amount;
+}
+
+const CATEGORIES_INCOME = ["Ivory Maids","Detailing","AI/Reactivation","W-2 Job","Other Income"];
+const CATEGORIES_EXPENSE = ["Supplies","Marketing","Software","Rent/Utilities","Personal","Taxes","Payroll","Other Expense"];
+const FREQ_LABELS = { once:"One-time", weekly:"Weekly", biweekly:"Biweekly", monthly:"Monthly" };
+
+const defaultIncome = [
+  { id:1, label:"Ivory Maids Revenue", category:"Ivory Maids", amount:3200, frequency:"monthly", startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01` },
+  { id:2, label:"W-2 Paycheck", category:"W-2 Job", amount:800, frequency:"biweekly", startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01` },
+];
+const defaultExpenses = [
+  { id:1, label:"Cleaning Supplies", category:"Supplies", amount:280, frequency:"monthly", startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01` },
+  { id:2, label:"Google Ads", category:"Marketing", amount:350, frequency:"monthly", startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01` },
+];
+
+let nextId = 20;
+
+const s = {
+  input: { background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#e2e8f0", padding:"7px 10px", fontSize:13, width:"100%", boxSizing:"border-box", outline:"none", fontFamily:"inherit" },
+};
+s.select = { ...s.input, cursor:"pointer" };
+
+function fmt(n) { return "$" + Math.round(Math.abs(n)).toLocaleString(); }
+
+function ItemRow({ item, onUpdate, onDelete, categories }) {
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 130px 110px 120px 130px 32px", gap:8, alignItems:"center", padding:"10px 0", borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+      <input value={item.label} onChange={e => onUpdate({...item,label:e.target.value})} placeholder="Description" style={s.input} />
+      <select value={item.category} onChange={e => onUpdate({...item,category:e.target.value})} style={s.select}>
+        {categories.map(c => <option key={c}>{c}</option>)}
+      </select>
+      <div style={{position:"relative"}}>
+        <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",fontSize:13}}>$</span>
+        <input type="number" value={item.amount} onChange={e => onUpdate({...item,amount:parseFloat(e.target.value)||0})} style={{...s.input,paddingLeft:22}} />
+      </div>
+      <select value={item.frequency} onChange={e => onUpdate({...item,frequency:e.target.value})} style={s.select}>
+        {Object.entries(FREQ_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+      </select>
+      <input type="date" value={item.startDate} onChange={e => onUpdate({...item,startDate:e.target.value})} style={s.input} />
+      <button onClick={onDelete} style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",color:"#f87171",borderRadius:6,cursor:"pointer",width:32,height:32,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+    </div>
+  );
+}
+
+function Section({ title, color, onAdd, children }) {
+  const rgb = color === "#34d399" ? "52,211,153" : "248,113,113";
+  return (
+    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"22px 24px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:color}} />
+          <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16,color:"#e2e8f0"}}>{title}</span>
+        </div>
+        <button onClick={onAdd} style={{background:`rgba(${rgb},0.1)`,border:`1px solid rgba(${rgb},0.25)`,color,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>+ Add</button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function App() {
+  const [income, setIncome] = useState(defaultIncome);
+  const [expenses, setExpenses] = useState(defaultExpenses);
+  const [months] = useState(() => getMonthsAhead(12));
+  const [startingBalance, setStartingBalance] = useState(5000);
+  const [view, setView] = useState("table");
+  const [activeTab, setActiveTab] = useState("planner"); // planner | actual
+
+  // Teller state
+  const [tellerReady, setTellerReady] = useState(false);
+  const [accessToken, setAccessToken] = useState(() => localStorage.getItem("teller_token") || null);
+  const [transactions, setTransactions] = useState([]);
+  const [loadingTx, setLoadingTx] = useState(false);
+  const [txError, setTxError] = useState(null);
+
+  // Load Teller Connect script
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.teller.io/connect/connect.js";
+    script.onload = () => setTellerReady(true);
+    document.head.appendChild(script);
+  }, []);
+
+  // Fetch transactions whenever we have a token
+  useEffect(() => {
+    if (!accessToken) return;
+    fetchTransactions(accessToken);
+  }, [accessToken]);
+
+  async function fetchTransactions(token) {
+    setLoadingTx(true);
+    setTxError(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/transactions?accessToken=${token}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setTransactions(data);
+    } catch (e) {
+      setTxError(e.message);
+    } finally {
+      setLoadingTx(false);
+    }
+  }
+
+  function openTellerConnect() {
+    if (!tellerReady || !window.TellerConnect) return;
+    const tc = window.TellerConnect.setup({
+      applicationId: TELLER_APP_ID,
+      products: ["transactions"],
+      environment: "sandbox",
+      onSuccess: (enrollment) => {
+        const token = enrollment.accessToken;
+        localStorage.setItem("teller_token", token);
+        setAccessToken(token);
+      },
+      onExit: () => {},
+    });
+    tc.open();
+  }
+
+  function disconnect() {
+    localStorage.removeItem("teller_token");
+    setAccessToken(null);
+    setTransactions([]);
+  }
+
+  // Projection
+  const projection = useMemo(() => {
+    let balance = startingBalance;
+    return months.map(({ label, month, year }) => {
+      const totalIn = income.reduce((s,i) => s + amountForMonth(i, month, year), 0);
+      const totalOut = expenses.reduce((s,e) => s + amountForMonth(e, month, year), 0);
+      const net = totalIn - totalOut;
+      balance += net;
+      return { label, totalIn, totalOut, net, balance };
+    });
+  }, [income, expenses, months, startingBalance]);
+
+  // Actual totals from real transactions (current month only)
+  const actualThisMonth = useMemo(() => {
+    const thisMonthTx = transactions.filter(tx => {
+      const d = new Date(tx.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+    const income = thisMonthTx.filter(t => t.amount > 0).reduce((s,t) => s + t.amount, 0);
+    const expenses = thisMonthTx.filter(t => t.amount < 0).reduce((s,t) => s + Math.abs(t.amount), 0);
+    return { income, expenses, net: income - expenses, count: thisMonthTx.length };
+  }, [transactions]);
+
+  const maxBalance = Math.max(...projection.map(p => p.balance), startingBalance);
+  const minBalance = Math.min(...projection.map(p => p.balance), 0);
+  const range = maxBalance - minBalance || 1;
+
+  const colHeaders = ["Description","Category","Amount","Frequency","Start Date",""];
+
+  return (
+    <div style={{minHeight:"100vh",background:"#0a0f1a",color:"#e2e8f0",fontFamily:"'DM Mono','Courier New',monospace",padding:"32px 24px"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@600;700;800&display=swap');
+        input:focus,select:focus{border-color:rgba(99,179,237,0.5)!important;box-shadow:0 0 0 2px rgba(99,179,237,0.1);}
+        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+        ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px;}
+      `}</style>
+
+      <div style={{maxWidth:1100,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",marginBottom:28}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,letterSpacing:"-0.5px",color:"#fff"}}>Cash Flow Planner</div>
+            <div style={{color:"#64748b",fontSize:13,marginTop:4}}>12-month projection + live bank data</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            {/* Bank connection button */}
+            {!accessToken ? (
+              <button onClick={openTellerConnect} disabled={!tellerReady} style={{background:"rgba(99,179,237,0.15)",border:"1px solid rgba(99,179,237,0.35)",color:"#63b3ed",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+                <span>🏦</span> Connect Bank
+              </button>
+            ) : (
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(52,211,153,0.1)",border:"1px solid rgba(52,211,153,0.25)",borderRadius:10,padding:"9px 14px"}}>
+                  <div style={{width:7,height:7,borderRadius:"50%",background:"#34d399"}} />
+                  <span style={{color:"#34d399",fontSize:12}}>Bank Connected</span>
+                  {loadingTx && <span style={{color:"#64748b",fontSize:11}}>syncing...</span>}
+                </div>
+                <button onClick={() => fetchTransactions(accessToken)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",color:"#94a3b8",borderRadius:8,padding:"9px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↻</button>
+                <button onClick={disconnect} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",color:"#f87171",borderRadius:8,padding:"9px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Disconnect</button>
+              </div>
+            )}
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{color:"#64748b",fontSize:13}}>Starting balance</span>
+              <div style={{position:"relative"}}>
+                <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8"}}>$</span>
+                <input type="number" value={startingBalance} onChange={e => setStartingBalance(parseFloat(e.target.value)||0)} style={{...s.input,paddingLeft:24,width:120,fontSize:15}} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {txError && (
+          <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"12px 16px",marginBottom:20,color:"#f87171",fontSize:13}}>
+            ⚠️ Bank sync error: {txError}. Make sure your Railway backend URL is set correctly in the app.
+          </div>
+        )}
+
+        {/* Summary Cards */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:28}}>
+          {[
+            {label:"Avg Monthly Income", value:fmt(projection.reduce((s,p)=>s+p.totalIn,0)/12), color:"#34d399"},
+            {label:"Avg Monthly Expenses", value:fmt(projection.reduce((s,p)=>s+p.totalOut,0)/12), color:"#f87171"},
+            {label:"Avg Net/Month", value:fmt(projection.reduce((s,p)=>s+p.net,0)/12), color: projection.reduce((s,p)=>s+p.net,0)/12>=0?"#60a5fa":"#f87171"},
+            {label:"Projected Balance (12mo)", value:fmt(projection[11]?.balance??0), color: projection[11]?.balance>=0?"#a78bfa":"#f87171"},
+          ].map(card => (
+            <div key={card.label} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"18px 20px"}}>
+              <div style={{color:"#64748b",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>{card.label}</div>
+              <div style={{fontSize:22,fontWeight:500,color:card.color}}>{card.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* This month actual vs projected (only when connected) */}
+        {accessToken && transactions.length > 0 && (
+          <div style={{background:"rgba(99,179,237,0.05)",border:"1px solid rgba(99,179,237,0.15)",borderRadius:14,padding:"20px 24px",marginBottom:28}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>This Month — Actual vs Projected</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+              {[
+                {label:"Income", actual:actualThisMonth.income, projected:projection[0]?.totalIn, color:"#34d399"},
+                {label:"Expenses", actual:actualThisMonth.expenses, projected:projection[0]?.totalOut, color:"#f87171"},
+                {label:"Net", actual:actualThisMonth.net, projected:projection[0]?.net, color:"#60a5fa"},
+              ].map(row => {
+                const diff = row.actual - row.projected;
+                return (
+                  <div key={row.label} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>{row.label}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+                      <div>
+                        <div style={{color:"#64748b",fontSize:10,marginBottom:2}}>Actual</div>
+                        <div style={{color:row.color,fontSize:18,fontWeight:500}}>{fmt(row.actual)}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{color:"#64748b",fontSize:10,marginBottom:2}}>Projected</div>
+                        <div style={{color:"#475569",fontSize:18}}>{fmt(row.projected)}</div>
+                      </div>
+                    </div>
+                    <div style={{marginTop:10,fontSize:12,color: diff >= 0 ? "#34d399" : "#f87171"}}>
+                      {diff >= 0 ? "▲" : "▼"} {fmt(Math.abs(diff))} {diff >= 0 ? "ahead" : "behind"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          {[["planner","Planner"],["actual","Transactions"],["chart","Chart"]].map(([v,label]) => (
+            <button key={v} onClick={() => setActiveTab(v)} style={{background:activeTab===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:activeTab===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.08)",color:activeTab===v?"#63b3ed":"#64748b",borderRadius:8,padding:"7px 18px",cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>
+              {label} {v==="actual" && transactions.length > 0 && <span style={{background:"rgba(99,179,237,0.2)",borderRadius:10,padding:"1px 7px",fontSize:11,marginLeft:4}}>{transactions.length}</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Planner Tab */}
+        {activeTab === "planner" && (
+          <>
+            <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto",marginBottom:24}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                    {["Month","Income","Expenses","Net","Running Balance"].map(h => (
+                      <th key={h} style={{padding:"14px 18px",textAlign:"left",color:"#475569",fontWeight:500,letterSpacing:"0.05em",fontSize:11,textTransform:"uppercase"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {projection.map((row,i) => (
+                    <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                      <td style={{padding:"13px 18px",color:"#94a3b8"}}>{row.label}</td>
+                      <td style={{padding:"13px 18px",color:"#34d399"}}>{fmt(row.totalIn)}</td>
+                      <td style={{padding:"13px 18px",color:"#f87171"}}>{fmt(row.totalOut)}</td>
+                      <td style={{padding:"13px 18px",color:row.net>=0?"#60a5fa":"#f87171",fontWeight:500}}>{row.net>=0?"+":""}{fmt(row.net)}</td>
+                      <td style={{padding:"13px 18px",color:row.balance>=0?"#e2e8f0":"#f87171",fontWeight:500}}>{fmt(row.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Section title="Income Streams" color="#34d399" onAdd={() => { setIncome(p => [...p,{id:nextId++,label:"",category:CATEGORIES_INCOME[0],amount:0,frequency:"monthly",startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01`}]); }}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 130px 110px 120px 130px 32px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
+                {colHeaders.map(h => <div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
+              </div>
+              {income.map(item => <ItemRow key={item.id} item={item} onUpdate={u => setIncome(p=>p.map(i=>i.id===u.id?u:i))} onDelete={() => setIncome(p=>p.filter(i=>i.id!==item.id))} categories={CATEGORIES_INCOME} />)}
+            </Section>
+            <div style={{height:20}} />
+            <Section title="Expenses" color="#f87171" onAdd={() => { setExpenses(p => [...p,{id:nextId++,label:"",category:CATEGORIES_EXPENSE[0],amount:0,frequency:"monthly",startDate:`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-01`}]); }}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 130px 110px 120px 130px 32px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
+                {colHeaders.map(h => <div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
+              </div>
+              {expenses.map(item => <ItemRow key={item.id} item={item} onUpdate={u => setExpenses(p=>p.map(i=>i.id===u.id?u:i))} onDelete={() => setExpenses(p=>p.filter(i=>i.id!==item.id))} categories={CATEGORIES_EXPENSE} />)}
+            </Section>
+          </>
+        )}
+
+        {/* Transactions Tab */}
+        {activeTab === "actual" && (
+          <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto"}}>
+            {!accessToken ? (
+              <div style={{padding:48,textAlign:"center",color:"#475569"}}>
+                <div style={{fontSize:32,marginBottom:12}}>🏦</div>
+                <div style={{fontSize:15,marginBottom:8,color:"#64748b"}}>No bank connected</div>
+                <div style={{fontSize:13}}>Click "Connect Bank" to link your accounts</div>
+              </div>
+            ) : loadingTx ? (
+              <div style={{padding:48,textAlign:"center",color:"#475569",fontSize:13}}>Loading transactions...</div>
+            ) : transactions.length === 0 ? (
+              <div style={{padding:48,textAlign:"center",color:"#475569",fontSize:13}}>No transactions found</div>
+            ) : (
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                    {["Date","Description","Category","Account","Amount"].map(h => (
+                      <th key={h} style={{padding:"14px 18px",textAlign:"left",color:"#475569",fontWeight:500,fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((tx,i) => (
+                    <tr key={tx.id} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                      <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
+                      <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
+                      <td style={{padding:"12px 18px"}}>
+                        <span style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8"}}>{tx.category}</span>
+                      </td>
+                      <td style={{padding:"12px 18px",color:"#475569",fontSize:12}}>{tx.accountName}</td>
+                      <td style={{padding:"12px 18px",color:tx.amount>0?"#34d399":"#f87171",fontWeight:500}}>
+                        {tx.amount>0?"+":""}{fmt(tx.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Chart Tab */}
+        {activeTab === "chart" && (
+          <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"24px 20px"}}>
+            <div style={{color:"#64748b",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:20}}>Projected Running Balance</div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:8,height:200}}>
+              {projection.map((row,i) => {
+                const h = Math.max(4,((row.balance-minBalance)/range)*180);
+                const isNeg = row.balance < 0;
+                return (
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                    <div style={{fontSize:10,color:isNeg?"#f87171":"#94a3b8",whiteSpace:"nowrap"}}>{fmt(row.balance)}</div>
+                    <div style={{width:"100%",height:h,background:isNeg?"rgba(248,113,113,0.4)":"rgba(99,179,237,0.35)",borderRadius:"4px 4px 0 0",border:isNeg?"1px solid rgba(248,113,113,0.5)":"1px solid rgba(99,179,237,0.4)"}} />
+                    <div style={{fontSize:10,color:"#475569",whiteSpace:"nowrap"}}>{row.label.split(" ")[0]}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}

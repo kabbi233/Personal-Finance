@@ -51,7 +51,8 @@ function amtForMonth(item,month,year){
   if(item.frequency==="biweekly") return item.amount*2.17;
   return item.amount;
 }
-function fmt(n){ return "$"+Math.round(Math.abs(n)).toLocaleString(); }
+function fmt(n){ return "$"+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtSigned(n){ return (n>0?"+":"")+(n<0?"-":"")+"$"+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 const CAT_IN  = ["Ivory Maids","Detailing","AI/Reactivation","W-2 Job","Other Income"];
 const CAT_OUT = ["Supplies","Marketing","Software","Rent/Utilities","Personal","Taxes","Payroll","Other Expense"];
@@ -118,6 +119,10 @@ function App(){
   const months = useMemo(()=>getMonths(12),[]);
   const [startBal,  setStartBal]  = useState(5000);
   const [activeTab, setActiveTab] = useState("planner");
+  const [datePreset, setDatePreset] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [dateTo, setDateTo] = useState("");
   const [accessToken,setAccessToken] = useState(()=>localStorage.getItem("teller_token")||null);
   const [transactions,setTransactions] = useState([]);
   const [loadingTx,  setLoadingTx]    = useState(false);
@@ -131,7 +136,7 @@ function App(){
         tcRef.current = window.TellerConnect.setup({
           applicationId: TELLER_APP_ID,
           products: ["transactions"],
-          environment: "development",
+          environment: "sandbox",
           onSuccess: enrollment => {
             const token = enrollment.accessToken;
             localStorage.setItem("teller_token", token);
@@ -349,43 +354,111 @@ function App(){
 
         {/* Transactions Tab */}
         {activeTab==="actual"&&(
-          <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto"}}>
+          <div>
             {!accessToken?(
-              <div style={{padding:48,textAlign:"center",color:"#475569"}}>
+              <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569"}}>
                 <div style={{fontSize:32,marginBottom:12}}>🏦</div>
                 <div style={{fontSize:15,marginBottom:8,color:"#64748b"}}>No bank connected</div>
                 <div style={{fontSize:13}}>Click "Connect Bank" above to link your accounts</div>
               </div>
-            ):loadingTx?(
-              <div style={{padding:48,textAlign:"center",color:"#475569",fontSize:13}}>Loading transactions…</div>
-            ):transactions.length===0?(
-              <div style={{padding:48,textAlign:"center",color:"#475569",fontSize:13}}>No transactions found</div>
-            ):(
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead>
-                  <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-                    {["Date","Description","Category","Account","Amount"].map(h=>(
-                      <th key={h} style={{padding:"14px 18px",textAlign:"left",color:"#475569",fontWeight:500,fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((tx,i)=>(
-                    <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                      <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
-                      <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
-                      <td style={{padding:"12px 18px"}}>
-                        <span style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8"}}>{tx.category}</span>
-                      </td>
-                      <td style={{padding:"12px 18px",color:"#475569",fontSize:12}}>{tx.accountName}</td>
-                      <td style={{padding:"12px 18px",color:tx.amount>0?"#34d399":"#f87171",fontWeight:500}}>
-                        {tx.amount>0?"+":""}{fmt(tx.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            ):(()=>{
+              const now = new Date();
+              const filtered = transactions.filter(tx=>{
+                const d = new Date(tx.date);
+                if(datePreset==="7d")  return (now-d)<=7*86400000;
+                if(datePreset==="30d") return (now-d)<=30*86400000;
+                if(datePreset==="90d") return (now-d)<=90*86400000;
+                if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
+                if(datePreset==="custom"){
+                  if(dateFrom && d < new Date(dateFrom)) return false;
+                  if(dateTo   && d > new Date(dateTo))   return false;
+                }
+                if(statusFilter!=="all" && (tx.status||"").toLowerCase()!==statusFilter) return false;
+                return true;
+              });
+              const sumIn  = filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+              const sumOut = filtered.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+              const sumNet = sumIn-sumOut;
+              return(
+                <>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                        <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
+                      ))}
+                    </div>
+                    {datePreset==="custom"&&(
+                      <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"5px 10px"}}>
+                        <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+                        <span style={{color:"#475569",fontSize:12}}>→</span>
+                        <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                    {[["all","All"],["posted","Posted"],["pending","Pending"],["declined","Declined"]].map(([v,label])=>{
+                      const colors = {posted:"52,211,153",pending:"251,191,36",declined:"248,113,113"};
+                      const rgb = colors[v]||"99,179,237";
+                      const active = statusFilter===v;
+                      return(
+                        <button key={v} onClick={()=>setStatusFilter(v)} style={{background:active?`rgba(${rgb},0.15)`:"rgba(255,255,255,0.04)",border:active?`1px solid rgba(${rgb},0.4)`:"1px solid rgba(255,255,255,0.1)",color:active?`rgb(${rgb})`:"#64748b",borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
+                      );
+                    })}
+                  </div>
+                  {loadingTx?(
+                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>Loading transactions…</div>
+                  ):filtered.length===0?(
+                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>No transactions in this range</div>
+                  ):(
+                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                        <thead>
+                          <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                            {["Date","Description","Category","Account","Status","Amount"].map(h=>(
+                              <th key={h} style={{padding:"14px 18px",textAlign:"left",color:"#475569",fontWeight:500,fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((tx,i)=>(
+                            <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                              <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
+                              <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
+                              <td style={{padding:"12px 18px"}}>
+                                <span style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8"}}>{tx.category}</span>
+                              </td>
+                              <td style={{padding:"12px 18px",color:"#475569",fontSize:12}}>{tx.accountName}</td>
+                              <td style={{padding:"12px 18px"}}>
+                                {(()=>{
+                                  const s = (tx.status||"unknown").toLowerCase();
+                                  const cfg = {
+                                    posted:  {bg:"rgba(52,211,153,0.1)",  border:"rgba(52,211,153,0.25)",  color:"#34d399"},
+                                    pending: {bg:"rgba(251,191,36,0.1)",   border:"rgba(251,191,36,0.25)",   color:"#fbbf24"},
+                                    declined:{bg:"rgba(248,113,113,0.1)", border:"rgba(248,113,113,0.25)", color:"#f87171"},
+                                  }[s]||{bg:"rgba(255,255,255,0.06)",border:"rgba(255,255,255,0.1)",color:"#94a3b8"};
+                                  return <span style={{background:cfg.bg,border:`1px solid ${cfg.border}`,borderRadius:6,padding:"3px 9px",fontSize:11,color:cfg.color,textTransform:"capitalize"}}>{s}</span>;
+                                })()}
+                              </td>
+                              <td style={{padding:"12px 18px",color:tx.amount>0?"#34d399":"#f87171",fontWeight:500,fontVariantNumeric:"tabular-nums"}}>
+                                {fmtSigned(tx.amount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderTop:"1px solid rgba(255,255,255,0.07)"}}>
+                        <span style={{color:"#475569",fontSize:12}}>{filtered.length} transaction{filtered.length!==1?"s":""}</span>
+                        <div style={{display:"flex",gap:20}}>
+                          <span style={{color:"#34d399",fontSize:12}}>Income: +{fmt(sumIn)}</span>
+                          <span style={{color:"#f87171",fontSize:12}}>Expenses: -{fmt(sumOut)}</span>
+                          <span style={{color:sumNet>=0?"#60a5fa":"#f87171",fontSize:12,fontWeight:500}}>Net: {fmtSigned(sumNet)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -418,3 +491,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
+

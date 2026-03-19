@@ -80,6 +80,10 @@ app.get("/transactions", async (req, res) => {
   }
 });
 
+// Serve frontend
+app.use(express.static(__dirname + "/public"));
+app.get("/", (_, res) => res.sendFile(__dirname + "/public/index.html"));
+
 // Health check
 app.get("/health", (_, res) => res.json({ ok: true }));
 

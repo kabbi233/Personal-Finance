@@ -1,13 +1,13 @@
-const express = require("express");
-const https   = require("https");
-const cors    = require("cors");
-const path    = require("path");
+const express  = require("express");
+const https    = require("https");
+const cors     = require("cors");
+const path     = require("path");
+const nodeFetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Normalize PEM — Railway sometimes strips real newlines
 function fixPem(pem) {
   if (!pem) return pem;
   if (pem.includes("\n")) return pem;
@@ -26,7 +26,7 @@ function tellerAuth(accessToken) {
 }
 
 async function tellerFetch(urlPath, accessToken) {
-  const res = await fetch(`${TELLER_BASE}${urlPath}`, {
+  const res = await nodeFetch(`${TELLER_BASE}${urlPath}`, {
     agent: tlsAgent,
     headers: { Authorization: tellerAuth(accessToken) },
   });
@@ -37,7 +37,6 @@ async function tellerFetch(urlPath, accessToken) {
   return res.json();
 }
 
-// GET /accounts
 app.get("/accounts", async (req, res) => {
   try {
     const { accessToken } = req.query;
@@ -49,7 +48,6 @@ app.get("/accounts", async (req, res) => {
   }
 });
 
-// GET /transactions
 app.get("/transactions", async (req, res) => {
   try {
     const { accessToken } = req.query;
@@ -74,7 +72,7 @@ app.get("/transactions", async (req, res) => {
             status:      tx.status,
           });
         }
-      } catch (_) { /* skip problem accounts */ }
+      } catch (_) {}
     }
 
     allTx.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -84,14 +82,23 @@ app.get("/transactions", async (req, res) => {
   }
 });
 
-// Serve frontend
+app.get("/debug-cert", (_, res) => {
+  const cert = process.env.TELLER_CERT || "";
+  const key  = process.env.TELLER_PRIVATE_KEY || "";
+  res.json({
+    certLength:    cert.length,
+    certNewlines:  (cert.match(/\n/g) || []).length,
+    certFirst50:   cert.substring(0, 50),
+    keyLength:     key.length,
+    keyNewlines:   (key.match(/\n/g) || []).length,
+    keyFirst50:    key.substring(0, 50),
+  });
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/", (_, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
-
-// Health check
 app.get("/health", (_, res) => res.json({ ok: true }));
 
-// Map Teller categories → planner categories
 function mapCategory(tellerCategory, amount, description) {
   const desc = (description || "").toLowerCase();
   const cat  = (tellerCategory  || "").toLowerCase();

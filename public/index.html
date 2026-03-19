@@ -131,7 +131,7 @@ function App(){
         tcRef.current = window.TellerConnect.setup({
           applicationId: TELLER_APP_ID,
           products: ["transactions"],
-          environment: "sandbox",
+          environment: "development",
           onSuccess: enrollment => {
             const token = enrollment.accessToken;
             localStorage.setItem("teller_token", token);

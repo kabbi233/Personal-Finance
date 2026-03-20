@@ -104,7 +104,7 @@ app.get("/transactions", async (req, res) => {
             category:    mapCategory(tx.details?.category, parseFloat(tx.amount), tx.description),
             accountName: acct.name,
             accountId:   acct.id,
-            status:      tx.status,
+            status:      (tx.description||'').toLowerCase().includes('declined') ? 'declined' : tx.status,
           });
         }
       } catch (_) {}

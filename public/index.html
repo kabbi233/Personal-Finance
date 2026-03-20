@@ -684,17 +684,20 @@ function App(){
               const now = new Date();
               const filtered = includedTx.filter(tx=>{
                 const d = new Date(tx.date);
-                if(datePreset==="7d")  return (now-d)<=7*86400000;
-                if(datePreset==="30d") return (now-d)<=30*86400000;
-                if(datePreset==="90d") return (now-d)<=90*86400000;
-                if(datePreset==="180d") return (now-d)<=180*86400000;
-                if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
-                if(datePreset==="today"){ const td=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0"); return tx.date===td; }
+                // Date range check
+                if(datePreset==="7d"   && (now-d)>7*86400000)   return false;
+                if(datePreset==="30d"  && (now-d)>30*86400000)  return false;
+                if(datePreset==="90d"  && (now-d)>90*86400000)  return false;
+                if(datePreset==="180d" && (now-d)>180*86400000) return false;
+                if(datePreset==="ytd"  && d.getFullYear()!==now.getFullYear()) return false;
+                if(datePreset==="today"){ const td=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0"); if(tx.date!==td) return false; }
                 if(datePreset==="custom"){
                   if(dateFrom && d < new Date(dateFrom)) return false;
                   if(dateTo   && d > new Date(dateTo))   return false;
                 }
+                // Status filter
                 if(statusFilter!=="all" && (tx.status||"").toLowerCase()!==statusFilter) return false;
+                // Search filter
                 if(search.trim() && !(tx.description||"").toLowerCase().includes(search.trim().toLowerCase())) return false;
                 return true;
               });
@@ -846,7 +849,7 @@ function App(){
 
         {/* Categories Tab */}
         {activeTab==="categories"&&(<div className="tab-content">
-          (()=>{
+          {(()=>{
             const now = new Date();
             const filtered = includedTx.filter(tx=>{
               const d = new Date(tx.date);
@@ -1113,7 +1116,7 @@ function App(){
 
               </div>
             );
-          })()
+          })()}
         </div>)}
 
         {/* Accounts Tab */}

@@ -65,7 +65,7 @@ const IS = {
 };
 const SS = {...IS, cursor:"pointer"};
 
-let NID = 30;
+function uid(){ return Date.now() + Math.floor(Math.random()*100000); }
 
 const FALLBACK_INCOME = [
   {id:1,label:"Ivory Maids Revenue",category:"Ivory Maids",amount:3200,frequency:"monthly",startDate:startOfMonth()},
@@ -571,14 +571,14 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <Section title="Income Streams" color="#34d399" onAdd={()=>{ const next=[...income,{id:NID++,label:"",category:CAT_IN[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}>
+            <Section title="Income Streams" color="#34d399" onAdd={()=>{ const next=[...income,{id:uid(),label:"",category:CAT_IN[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
               {income.map(item=><ItemRow key={item.id} item={item} cats={allCatsIn} onUpdate={u=>{ const next=income.map(i=>i.id===u.id?u:i); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=income.filter(i=>i.id!==item.id); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}/>)}
             </Section>
             <div style={{height:20}}/>
-            <Section title="Expenses" color="#f87171" onAdd={()=>{ const next=[...expenses,{id:NID++,label:"",category:CAT_OUT[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}>
+            <Section title="Expenses" color="#f87171" onAdd={()=>{ const next=[...expenses,{id:uid(),label:"",category:CAT_OUT[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
@@ -604,6 +604,7 @@ function App(){
                 if(datePreset==="30d") return (now-d)<=30*86400000;
                 if(datePreset==="90d") return (now-d)<=90*86400000;
                 if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
+                if(datePreset==="year") return d.getFullYear()===CY;
                 if(datePreset==="custom"){
                   if(dateFrom && d < new Date(dateFrom)) return false;
                   if(dateTo   && d > new Date(dateTo))   return false;
@@ -623,7 +624,7 @@ function App(){
                   </div>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                      {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["year","This Year"],["all","All"],["custom","Custom"]].map(([v,label])=>(
                         <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
                       ))}
                     </div>
@@ -756,6 +757,7 @@ function App(){
               if(datePreset==="30d") return (now-d)<=30*86400000;
               if(datePreset==="90d") return (now-d)<=90*86400000;
               if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
+                if(datePreset==="year") return d.getFullYear()===CY;
               if(datePreset==="custom"){
                 if(dateFrom && d < new Date(dateFrom)) return false;
                 if(dateTo   && d > new Date(dateTo))   return false;
@@ -779,7 +781,7 @@ function App(){
               <div>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                    {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["year","This Year"],["all","All"],["custom","Custom"]].map(([v,label])=>(
                       <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
                     ))}
                   </div>

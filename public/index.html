@@ -18,7 +18,12 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     select option { background: #1e293b; color: #e2e8f0; }
-    body::before { content:''; position:fixed; inset:0; z-index:-1; background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(15,70,90,0.35) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(60,30,100,0.3) 0%, transparent 55%), #080d18; animation: meshShift 18s ease-in-out infinite alternate; }
+    body::before { content:''; position:fixed; inset:0; z-index:-1; transition: background 0.6s ease; animation: meshShift 18s ease-in-out infinite alternate; }
+    body.tab-planner::before     { background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(15,70,90,0.45) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(20,40,80,0.3) 0%, transparent 55%), #080d18; }
+    body.tab-actual::before      { background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(10,70,70,0.45) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(5,60,55,0.3) 0%, transparent 55%), #080d18; }
+    body.tab-categories::before  { background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(50,20,90,0.45) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(40,15,80,0.3) 0%, transparent 55%), #080d18; }
+    body.tab-accounts::before    { background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(10,60,30,0.45) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(8,55,25,0.3) 0%, transparent 55%), #080d18; }
+    body.tab-chart::before       { background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(70,45,5,0.45) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(60,35,5,0.3) 0%, transparent 55%), #080d18; }
     @keyframes meshShift { 0% { filter: hue-rotate(0deg) brightness(1); } 50% { filter: hue-rotate(8deg) brightness(1.04); } 100% { filter: hue-rotate(-5deg) brightness(0.97); } }
     .glass-card { background: rgba(255,255,255,0.045) !important; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.09) !important; box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06); }
     .tab-content { animation: fadeInUp 0.18s ease; }
@@ -188,6 +193,10 @@ function App(){
   const [expenses, setExpenses] = useState(loadExpenses);
   const months = useMemo(()=>getMonths(12),[]);
   const [activeTab,   setActiveTab]   = useState("planner");
+
+  useEffect(()=>{
+    document.body.className = "tab-" + activeTab;
+  },[activeTab]);
   const [datePreset,  setDatePreset]  = useState("all");
   const [dateFrom,    setDateFrom]    = useState("");
   const [dateTo,      setDateTo]      = useState("");

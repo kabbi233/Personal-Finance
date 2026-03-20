@@ -67,14 +67,16 @@ const SS = {...IS, cursor:"pointer"};
 
 let NID = 30;
 
-const defaultIncome = [
+const FALLBACK_INCOME = [
   {id:1,label:"Ivory Maids Revenue",category:"Ivory Maids",amount:3200,frequency:"monthly",startDate:startOfMonth()},
   {id:2,label:"W-2 Paycheck",category:"W-2 Job",amount:800,frequency:"biweekly",startDate:startOfMonth()},
 ];
-const defaultExpenses = [
+const FALLBACK_EXPENSES = [
   {id:1,label:"Cleaning Supplies",category:"Supplies",amount:280,frequency:"monthly",startDate:startOfMonth()},
   {id:2,label:"Google Ads",category:"Marketing",amount:350,frequency:"monthly",startDate:startOfMonth()},
 ];
+function loadIncome(){  try{ const s=localStorage.getItem("income_streams");  return s?JSON.parse(s):FALLBACK_INCOME;  }catch{ return FALLBACK_INCOME;  } }
+function loadExpenses(){ try{ const s=localStorage.getItem("expense_streams"); return s?JSON.parse(s):FALLBACK_EXPENSES; }catch{ return FALLBACK_EXPENSES; } }
 
 
 const CAT_COLORS = [
@@ -119,8 +121,8 @@ function Section({title,color,onAdd,children}){
 
 function App(){
   const {useState,useMemo,useEffect,useRef} = React;
-  const [income,   setIncome]   = useState(defaultIncome);
-  const [expenses, setExpenses] = useState(defaultExpenses);
+  const [income,   setIncome]   = useState(loadIncome);
+  const [expenses, setExpenses] = useState(loadExpenses);
   const months = useMemo(()=>getMonths(12),[]);
   const [activeTab,   setActiveTab]   = useState("planner");
   const [datePreset,  setDatePreset]  = useState("all");
@@ -403,18 +405,18 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <Section title="Income Streams" color="#34d399" onAdd={()=>setIncome(p=>[...p,{id:NID++,label:"",category:CAT_IN[0],amount:0,frequency:"monthly",startDate:startOfMonth()}])}>
+            <Section title="Income Streams" color="#34d399" onAdd={()=>{ const next=[...income,{id:NID++,label:"",category:CAT_IN[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
-              {income.map(item=><ItemRow key={item.id} item={item} cats={CAT_IN} onUpdate={u=>setIncome(p=>p.map(i=>i.id===u.id?u:i))} onDelete={()=>setIncome(p=>p.filter(i=>i.id!==item.id))}/>)}
+              {income.map(item=><ItemRow key={item.id} item={item} cats={CAT_IN} onUpdate={u=>{ const next=income.map(i=>i.id===u.id?u:i); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=income.filter(i=>i.id!==item.id); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}/>)}
             </Section>
             <div style={{height:20}}/>
-            <Section title="Expenses" color="#f87171" onAdd={()=>setExpenses(p=>[...p,{id:NID++,label:"",category:CAT_OUT[0],amount:0,frequency:"monthly",startDate:startOfMonth()}])}>
+            <Section title="Expenses" color="#f87171" onAdd={()=>{ const next=[...expenses,{id:NID++,label:"",category:CAT_OUT[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
-              {expenses.map(item=><ItemRow key={item.id} item={item} cats={CAT_OUT} onUpdate={u=>setExpenses(p=>p.map(i=>i.id===u.id?u:i))} onDelete={()=>setExpenses(p=>p.filter(i=>i.id!==item.id))}/>)}
+              {expenses.map(item=><ItemRow key={item.id} item={item} cats={CAT_OUT} onUpdate={u=>{ const next=expenses.map(i=>i.id===u.id?u:i); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=expenses.filter(i=>i.id!==item.id); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}/>)}
             </Section>
           </>
         )}

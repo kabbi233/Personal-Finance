@@ -76,6 +76,11 @@ const defaultExpenses = [
   {id:2,label:"Google Ads",category:"Marketing",amount:350,frequency:"monthly",startDate:startOfMonth()},
 ];
 
+
+const CAT_COLORS = [
+  "#818cf8","#60a5fa","#34d399","#f59e0b","#f87171","#e879f9","#a78bfa","#38bdf8","#fb923c","#4ade80","#f472b6","#facc15"
+];
+
 function ItemRow({item,onUpdate,onDelete,cats}){
   return(
     <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,alignItems:"center",padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
@@ -114,58 +119,115 @@ function Section({title,color,onAdd,children}){
 
 function App(){
   const {useState,useMemo,useEffect,useRef} = React;
-  const [income,  setIncome]   = useState(defaultIncome);
-  const [expenses,setExpenses] = useState(defaultExpenses);
+  const [income,   setIncome]   = useState(defaultIncome);
+  const [expenses, setExpenses] = useState(defaultExpenses);
   const months = useMemo(()=>getMonths(12),[]);
-  const [startBal,  setStartBal]  = useState(5000);
-  const [activeTab, setActiveTab] = useState("planner");
-  const [datePreset, setDatePreset] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [dateTo, setDateTo] = useState("");
-  const [accessToken,setAccessToken] = useState(()=>localStorage.getItem("teller_token")||null);
-  const [transactions,setTransactions] = useState([]);
-  const [loadingTx,  setLoadingTx]    = useState(false);
-  const [txError,    setTxError]      = useState(null);
+  const [activeTab,   setActiveTab]   = useState("planner");
+  const [datePreset,  setDatePreset]  = useState("all");
+  const [dateFrom,    setDateFrom]    = useState("");
+  const [dateTo,      setDateTo]      = useState("");
+  const [statusFilter,setStatusFilter]= useState("all");
+  const [editingCat,  setEditingCat]  = useState(null);
+  const [catOverrides,setCatOverrides]= useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("cat_overrides")||"{}"); }catch{ return {}; }
+  });
+
+  // Multi-account state
+  // enrollments: [{token, label}]  accountMeta: {accountId: {balance, name, type, institution, lastFour}}
+  // excluded: Set of accountIds
+  const [enrollments, setEnrollments] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("enrollments")||"[]"); }catch{ return []; }
+  });
+  const [accountMeta,  setAccountMeta]  = useState({});
+  const [excluded,     setExcluded]     = useState(()=>{
+    try{ return new Set(JSON.parse(localStorage.getItem("excluded_accounts")||"[]")); }catch{ return new Set(); }
+  });
+  const [transactions, setTransactions] = useState([]);
+  const [loadingTx,    setLoadingTx]    = useState(false);
+  const [txError,      setTxError]      = useState(null);
+  const [loadingBal,   setLoadingBal]   = useState(false);
+  const [lastSync,     setLastSync]     = useState(null);
   const tcRef = useRef(null);
 
-  // Init Teller Connect once script is ready
+  // Derived: starting balance = sum of included account balances
+  const startBal = useMemo(()=>{
+    return Object.entries(accountMeta)
+      .filter(([id])=>!excluded.has(id))
+      .reduce((s,[,m])=>s+(m.available||0),0);
+  },[accountMeta,excluded]);
+
+  function saveEnrollments(list){
+    setEnrollments(list);
+    localStorage.setItem("enrollments", JSON.stringify(list));
+  }
+  function saveExcluded(set){
+    setExcluded(new Set(set));
+    localStorage.setItem("excluded_accounts", JSON.stringify([...set]));
+  }
+
+  function overrideCat(txId, newCat){
+    const updated = {...catOverrides, [txId]: newCat};
+    setCatOverrides(updated);
+    localStorage.setItem("cat_overrides", JSON.stringify(updated));
+    setEditingCat(null);
+    setTransactions(prev => prev.map(t => t.id===txId ? {...t, category:newCat} : t));
+  }
+
+  // Init Teller Connect
   useEffect(()=>{
     function init(){
       if(window.TellerConnect){
         tcRef.current = window.TellerConnect.setup({
           applicationId: TELLER_APP_ID,
-          products: ["transactions"],
-          environment: "sandbox",
+          products: ["transactions","balance"],
+          environment: "development",
           onSuccess: enrollment => {
             const token = enrollment.accessToken;
-            localStorage.setItem("teller_token", token);
-            setAccessToken(token);
+            const newList = [...enrollments, {token, label:""}];
+            saveEnrollments(newList);
+            fetchAllData(newList);
           },
           onExit: ()=>{},
         });
       }
     }
     if(window.TellerConnect) init();
-    else {
+    else{
       const script = document.querySelector('script[src*="teller.io"]');
       if(script) script.addEventListener("load", init);
     }
+  },[enrollments]);
+
+  // On load, fetch data for all stored enrollments
+  useEffect(()=>{
+    if(enrollments.length>0) fetchAllData(enrollments);
   },[]);
 
-  useEffect(()=>{
-    if(accessToken) fetchTx(accessToken);
-  },[accessToken]);
-
-  async function fetchTx(token){
-    setLoadingTx(true); setTxError(null);
+  async function fetchAllData(list){
+    setLoadingTx(true); setLoadingBal(true); setTxError(null);
     try{
-      const res  = await fetch(`${BACKEND_URL}/transactions?accessToken=${token}`);
-      const data = await res.json();
-      if(data.error) throw new Error(data.error);
-      setTransactions(data);
+      const allTx = [];
+      const newMeta = {};
+      for(const {token} of list){
+        // fetch balances
+        try{
+          const bRes  = await fetch(`${BACKEND_URL}/balances?accessToken=${token}`);
+          const bData = await bRes.json();
+          if(Array.isArray(bData)) bData.forEach(b=>{ newMeta[b.accountId]=b; });
+        }catch(_){}
+        // fetch transactions
+        try{
+          const tRes  = await fetch(`${BACKEND_URL}/transactions?accessToken=${token}`);
+          const tData = await tRes.json();
+          if(Array.isArray(tData)) allTx.push(...tData);
+        }catch(_){}
+      }
+      setAccountMeta(newMeta);
+      allTx.sort((a,b)=>new Date(b.date)-new Date(a.date));
+      setTransactions(allTx);
+      setLastSync(new Date());
     }catch(e){ setTxError(e.message); }
-    finally{ setLoadingTx(false); }
+    finally{ setLoadingTx(false); setLoadingBal(false); }
   }
 
   function openConnect(){
@@ -173,10 +235,20 @@ function App(){
     else alert("Teller Connect is still loading, try again in a moment.");
   }
 
-  function disconnect(){
-    localStorage.removeItem("teller_token");
-    setAccessToken(null); setTransactions([]);
+  function removeEnrollment(token){
+    const newList = enrollments.filter(e=>e.token!==token);
+    saveEnrollments(newList);
+    fetchAllData(newList);
   }
+
+  function toggleExclude(accountId){
+    const next = new Set(excluded);
+    if(next.has(accountId)) next.delete(accountId); else next.add(accountId);
+    saveExcluded(next);
+  }
+
+  // Filtered transactions (only included accounts)
+  const includedTx = useMemo(()=>transactions.filter(t=>!excluded.has(t.accountId)),[transactions,excluded]);
 
   const projection = useMemo(()=>{
     let bal = startBal;
@@ -190,11 +262,11 @@ function App(){
   },[income,expenses,months,startBal]);
 
   const actualNow = useMemo(()=>{
-    const tx = transactions.filter(t=>{ const d=new Date(t.date); return d.getMonth()===CM&&d.getFullYear()===CY; });
+    const tx = includedTx.filter(t=>{ const d=new Date(t.date); return d.getMonth()===CM&&d.getFullYear()===CY; });
     const inc = tx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
     const exp = tx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
     return {income:inc,expenses:exp,net:inc-exp};
-  },[transactions]);
+  },[includedTx]);
 
   const maxBal = Math.max(...projection.map(p=>p.balance),startBal);
   const minBal = Math.min(...projection.map(p=>p.balance),0);
@@ -307,7 +379,9 @@ function App(){
         {/* Tabs */}
         <div style={{display:"flex",gap:8,marginBottom:20}}>
           {tabBtn("planner","Planner",0)}
-          {tabBtn("actual","Transactions",transactions.length)}
+          {tabBtn("actual","Transactions",includedTx.length)}
+          {tabBtn("categories","Categories",0)}
+          {tabBtn("accounts","Accounts",enrollments.length)}
           {tabBtn("chart","Chart",0)}
         </div>
 
@@ -363,7 +437,7 @@ function App(){
               </div>
             ):(()=>{
               const now = new Date();
-              const filtered = transactions.filter(tx=>{
+              const filtered = includedTx.filter(tx=>{
                 const d = new Date(tx.date);
                 if(datePreset==="7d")  return (now-d)<=7*86400000;
                 if(datePreset==="30d") return (now-d)<=30*86400000;
@@ -424,8 +498,19 @@ function App(){
                             <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
                               <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
                               <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
-                              <td style={{padding:"12px 18px"}}>
-                                <span style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8"}}>{tx.category}</span>
+                              <td style={{padding:"12px 18px"}} onClick={e=>{ e.stopPropagation(); setEditingCat(tx.id===editingCat?null:tx.id); }}>
+                                {editingCat===tx.id?(
+                                  <select autoFocus value={tx.category}
+                                    onChange={e=>overrideCat(tx.id,e.target.value)}
+                                    onBlur={()=>setEditingCat(null)}
+                                    style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(99,179,237,0.4)",borderRadius:6,color:"#63b3ed",padding:"3px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>
+                                    {[...CAT_IN,...CAT_OUT].map(c=><option key={c}>{c}</option>)}
+                                  </select>
+                                ):(
+                                  <span title="Click to reassign" style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8",cursor:"pointer",borderBottom:"1px dashed rgba(255,255,255,0.15)"}}>
+                                    {tx.category} ✎
+                                  </span>
+                                )}
                               </td>
                               <td style={{padding:"12px 18px",color:"#475569",fontSize:12}}>{tx.accountName}</td>
                               <td style={{padding:"12px 18px"}}>
@@ -462,6 +547,174 @@ function App(){
           </div>
         )}
 
+
+        {/* Categories Tab */}
+        {activeTab==="categories"&&(
+          (()=>{
+            const now = new Date();
+            const filtered = includedTx.filter(tx=>{
+              const d = new Date(tx.date);
+              if(datePreset==="7d")  return (now-d)<=7*86400000;
+              if(datePreset==="30d") return (now-d)<=30*86400000;
+              if(datePreset==="90d") return (now-d)<=90*86400000;
+              if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
+              if(datePreset==="custom"){
+                if(dateFrom && d < new Date(dateFrom)) return false;
+                if(dateTo   && d > new Date(dateTo))   return false;
+              }
+              return true;
+            });
+            const totalIn  = filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+            const totalOut = filtered.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+            const totalNet = totalIn - totalOut;
+            const expByCat = {};
+            const incByCat = {};
+            filtered.forEach(tx=>{
+              if(tx.amount<0){ expByCat[tx.category]=(expByCat[tx.category]||0)+Math.abs(tx.amount); }
+              else {            incByCat[tx.category]=(incByCat[tx.category]||0)+tx.amount; }
+            });
+            const expRows = Object.entries(expByCat).sort((a,b)=>b[1]-a[1]);
+            const incRows = Object.entries(incByCat).sort((a,b)=>b[1]-a[1]);
+            const maxExp  = expRows[0]?.[1]||1;
+            const maxInc  = incRows[0]?.[1]||1;
+            return(
+              <div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                      <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
+                    ))}
+                  </div>
+                  {datePreset==="custom"&&(
+                    <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"5px 10px"}}>
+                      <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+                      <span style={{color:"#475569",fontSize:12}}>→</span>
+                      <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                  {[
+                    {label:"Total Spent",  value:fmt(totalOut), color:"#f87171"},
+                    {label:"Total Income", value:fmt(totalIn),  color:"#34d399"},
+                    {label:"Net",          value:fmtSigned(totalNet), color:totalNet>=0?"#60a5fa":"#f87171"},
+                  ].map(c=>(
+                    <div key={c.label} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"16px 20px"}}>
+                      <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>{c.label}</div>
+                      <div style={{fontSize:20,fontWeight:500,color:c.color}}>{c.value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+                  <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18}}>
+                    <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:16}}>Expense breakdown</div>
+                    {expRows.length===0?(
+                      <div style={{color:"#475569",fontSize:13}}>No expenses in this period</div>
+                    ):(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        {expRows.map(([cat,amt],i)=>(
+                          <div key={cat}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                              <span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span>
+                              <span style={{fontSize:12,color:"#e2e8f0",fontWeight:500}}>{fmt(amt)} <span style={{color:"#64748b",fontWeight:400}}>{(amt/totalOut*100).toFixed(1)}%</span></span>
+                            </div>
+                            <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
+                              <div style={{width:`${(amt/maxExp*100).toFixed(1)}%`,height:"100%",background:CAT_COLORS[i%CAT_COLORS.length],borderRadius:3}}/>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18}}>
+                    <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:16}}>Income breakdown</div>
+                    {incRows.length===0?(
+                      <div style={{color:"#475569",fontSize:13}}>No income in this period</div>
+                    ):(
+                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                        {incRows.map(([cat,amt],i)=>(
+                          <div key={cat}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                              <span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span>
+                              <span style={{fontSize:12,color:"#e2e8f0",fontWeight:500}}>{fmt(amt)} <span style={{color:"#64748b",fontWeight:400}}>{(amt/totalIn*100).toFixed(1)}%</span></span>
+                            </div>
+                            <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
+                              <div style={{width:`${(amt/maxInc*100).toFixed(1)}%`,height:"100%",background:CAT_COLORS[(i+5)%CAT_COLORS.length],borderRadius:3}}/>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        )}
+
+        {/* Accounts Tab */}
+        {activeTab==="accounts"&&(
+          <div>
+            {Object.keys(accountMeta).length===0?(
+              <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569"}}>
+                <div style={{fontSize:32,marginBottom:12}}>🏦</div>
+                <div style={{fontSize:15,marginBottom:8,color:"#64748b"}}>No accounts connected</div>
+                <div style={{fontSize:13}}>Click "+ Connect Bank" to link your first account</div>
+              </div>
+            ):(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                  {[
+                    {label:"Total Balance", value:fmt(Object.values(accountMeta).reduce((s,m)=>s+(m.available||0),0)), sub:`across ${Object.keys(accountMeta).length} account${Object.keys(accountMeta).length!==1?"s":""}`, color:"#e2e8f0"},
+                    {label:"Included in Projection", value:fmt(startBal), sub:`${Object.keys(accountMeta).filter(id=>!excluded.has(id)).length} of ${Object.keys(accountMeta).length} accounts`, color:"#60a5fa"},
+                    {label:"Last Synced", value:lastSync?lastSync.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"—", sub:"click ↻ to refresh", color:"#94a3b8"},
+                  ].map(c=>(
+                    <div key={c.label} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"16px 20px"}}>
+                      <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>{c.label}</div>
+                      <div style={{fontSize:20,fontWeight:500,color:c.color}}>{c.value}</div>
+                      <div style={{fontSize:11,color:"#475569",marginTop:4}}>{c.sub}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {Object.entries(accountMeta).map(([id,meta])=>{
+                    const isExcluded = excluded.has(id);
+                    return(
+                      <div key={id} style={{background:"rgba(255,255,255,0.03)",border:`1px solid ${isExcluded?"rgba(255,255,255,0.07)":"rgba(52,211,153,0.2)"}`,borderRadius:12,padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",opacity:isExcluded?0.65:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:14}}>
+                          <div style={{width:38,height:38,borderRadius:10,background:isExcluded?"rgba(255,255,255,0.05)":"rgba(52,211,153,0.1)",border:`1px solid ${isExcluded?"rgba(255,255,255,0.1)":"rgba(52,211,153,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏦</div>
+                          <div>
+                            <div style={{fontSize:14,fontWeight:500,color:isExcluded?"#94a3b8":"#e2e8f0"}}>{meta.accountName}</div>
+                            <div style={{fontSize:11,color:"#475569",marginTop:2}}>{meta.institution}{meta.lastFour?` · ••••${meta.lastFour}`:""}</div>
+                          </div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:20}}>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:15,fontWeight:500,color:isExcluded?"#64748b":"#60a5fa"}}>{fmt(meta.available||0)}</div>
+                            <div style={{fontSize:11,color:"#475569"}}>{meta.subtype||meta.type||"account"}</div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleExclude(id)}>
+                            <span style={{fontSize:11,color:isExcluded?"#64748b":"#34d399"}}>{isExcluded?"Excluded":"Included"}</span>
+                            <div style={{width:36,height:20,background:isExcluded?"rgba(255,255,255,0.1)":"#34d399",borderRadius:10,position:"relative",transition:"background 0.2s"}}>
+                              <div style={{width:16,height:16,background:isExcluded?"#475569":"white",borderRadius:"50%",position:"absolute",top:2,left:isExcluded?2:18,transition:"left 0.2s"}}/>
+                            </div>
+                          </div>
+                          <button onClick={()=>{
+                            const enrollment = enrollments.find(e=>{
+                              return true;
+                            });
+                            const newList = enrollments.filter((_,i)=>i!==0);
+                            if(enrollments.length===1) saveEnrollments([]);
+                          }} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:7,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {/* Chart Tab */}
         {activeTab==="chart"&&(
           <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"24px 20px"}}>
@@ -491,4 +744,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
-

@@ -130,9 +130,37 @@ function App(){
   const [dateTo,      setDateTo]      = useState("");
   const [statusFilter,setStatusFilter]= useState("all");
   const [editingCat,  setEditingCat]  = useState(null);
+  const [drilldown,    setDrilldown]    = useState(null); // 'income' | 'expenses' | null
   const [catOverrides,setCatOverrides]= useState(()=>{
     try{ return JSON.parse(localStorage.getItem("cat_overrides")||"{}"); }catch{ return {}; }
   });
+  const [customCatsIn,  setCustomCatsIn]  = useState(()=>{ try{ const s=localStorage.getItem("custom_cats_in");  return s?JSON.parse(s):[]; }catch{ return []; } });
+  const [customCatsOut, setCustomCatsOut] = useState(()=>{ try{ const s=localStorage.getItem("custom_cats_out"); return s?JSON.parse(s):[]; }catch{ return []; } });
+  const [newCatName,    setNewCatName]    = useState("");
+  const [newCatType,    setNewCatType]    = useState("expense");
+  const allCatsIn  = useMemo(()=>[...CAT_IN,  ...customCatsIn],  [customCatsIn]);
+  const allCatsOut = useMemo(()=>[...CAT_OUT, ...customCatsOut], [customCatsOut]);
+
+  function addCustomCat(){
+    if(!newCatName.trim()) return;
+    if(newCatType==="income"){
+      const next=[...customCatsIn, newCatName.trim()];
+      setCustomCatsIn(next); localStorage.setItem("custom_cats_in", JSON.stringify(next));
+    } else {
+      const next=[...customCatsOut, newCatName.trim()];
+      setCustomCatsOut(next); localStorage.setItem("custom_cats_out", JSON.stringify(next));
+    }
+    setNewCatName("");
+  }
+  function deleteCustomCat(name, type){
+    if(type==="income"){
+      const next=customCatsIn.filter(c=>c!==name);
+      setCustomCatsIn(next); localStorage.setItem("custom_cats_in", JSON.stringify(next));
+    } else {
+      const next=customCatsOut.filter(c=>c!==name);
+      setCustomCatsOut(next); localStorage.setItem("custom_cats_out", JSON.stringify(next));
+    }
+  }
 
   // Multi-account state
   // enrollments: [{token, label}]  accountMeta: {accountId: {balance, name, type, institution, lastFour}}
@@ -338,19 +366,24 @@ function App(){
         </div>
 
         {/* Actual vs Projected (this month) */}
-        {enrollments.length>0&&includedTx.length>0&&(
+        {enrollments.length>0&&includedTx.length>0&&(income.length>0||expenses.length>0)&&(
           <div style={{background:"rgba(99,179,237,0.05)",border:"1px solid rgba(99,179,237,0.15)",borderRadius:14,padding:"20px 24px",marginBottom:28}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>This Month — Actual vs Projected</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
               {[
-                {label:"Income",  actual:actualNow.income,   projected:projection[0]?.totalIn,  color:"#34d399"},
-                {label:"Expenses",actual:actualNow.expenses,  projected:projection[0]?.totalOut, color:"#f87171"},
-                {label:"Net",     actual:actualNow.net,       projected:projection[0]?.net,      color:"#60a5fa"},
+                {label:"Income",  key:"income",   actual:actualNow.income,   projected:projection[0]?.totalIn,  color:"#34d399", clickable:true},
+                {label:"Expenses",key:"expenses",  actual:actualNow.expenses, projected:projection[0]?.totalOut, color:"#f87171", clickable:true},
+                {label:"Net",     key:"net",       actual:actualNow.net,      projected:projection[0]?.net,      color:"#60a5fa", clickable:false},
               ].map(row=>{
-                const diff = row.actual-row.projected;
+                const diff = row.actual-(row.projected||0);
                 return(
-                  <div key={row.label} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"14px 16px"}}>
-                    <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>{row.label}</div>
+                  <div key={row.label} onClick={()=>row.clickable&&setDrilldown(row.key)} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"14px 16px",cursor:row.clickable?"pointer":"default",border:row.clickable?"1px solid rgba(255,255,255,0.06)":"1px solid transparent",transition:"border 0.15s"}}
+                    onMouseOver={e=>{ if(row.clickable) e.currentTarget.style.border="1px solid rgba(255,255,255,0.15)"; }}
+                    onMouseOut={e=>{ if(row.clickable) e.currentTarget.style.border="1px solid rgba(255,255,255,0.06)"; }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{row.label}</div>
+                      {row.clickable&&<span style={{color:"#475569",fontSize:10}}>click to view ↗</span>}
+                    </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
                       <div>
                         <div style={{color:"#64748b",fontSize:10,marginBottom:2}}>Actual</div>
@@ -358,16 +391,64 @@ function App(){
                       </div>
                       <div style={{textAlign:"right"}}>
                         <div style={{color:"#64748b",fontSize:10,marginBottom:2}}>Projected</div>
-                        <div style={{color:"#475569",fontSize:18}}>{fmt(row.projected)}</div>
+                        <div style={{color:"#475569",fontSize:18}}>{fmt(row.projected||0)}</div>
                       </div>
                     </div>
-                    <div style={{marginTop:10,fontSize:12,color:diff>=0?"#34d399":"#f87171"}}>
-                      {diff>=0?"▲":"▼"} {fmt(Math.abs(diff))} {diff>=0?"ahead":"behind"}
-                    </div>
+                    {(row.projected||0)>0&&(
+                      <div style={{marginTop:10,fontSize:12,color:diff>=0?"#34d399":"#f87171"}}>
+                        {diff>=0?"▲":"▼"} {fmt(Math.abs(diff))} {diff>=0?"ahead":"behind"}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+            {drilldown&&(()=>{
+              const thisMoTx = includedTx.filter(t=>{ const d=new Date(t.date); return d.getMonth()===CM&&d.getFullYear()===CY; });
+              const shown = drilldown==="income" ? thisMoTx.filter(t=>t.amount>0) : thisMoTx.filter(t=>t.amount<0);
+              return(
+                <div style={{marginTop:16,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,overflow:"hidden"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+                    <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"#e2e8f0",textTransform:"capitalize"}}>This Month — {drilldown} transactions ({shown.length})</span>
+                    <button onClick={()=>setDrilldown(null)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#94a3b8",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>✕ Close</button>
+                  </div>
+                  {shown.length===0?(
+                    <div style={{padding:24,textAlign:"center",color:"#475569",fontSize:13}}>No {drilldown} transactions this month</div>
+                  ):(
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                      <thead>
+                        <tr style={{borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+                          {["Date","Description","Category","Amount"].map(h=>(
+                            <th key={h} style={{padding:"11px 18px",textAlign:"left",color:"#475569",fontWeight:500,fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shown.map((tx,i)=>(
+                          <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                            <td style={{padding:"10px 18px",color:"#64748b"}}>{tx.date}</td>
+                            <td style={{padding:"10px 18px",color:"#94a3b8",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
+                            <td style={{padding:"10px 18px"}} onClick={e=>{ e.stopPropagation(); setEditingCat(tx.id===editingCat?null:tx.id); }}>
+                              {editingCat===tx.id?(
+                                <select autoFocus value={tx.category}
+                                  onChange={e=>overrideCat(tx.id,e.target.value)}
+                                  onBlur={()=>{ setTimeout(()=>setEditingCat(null),200); }}
+                                  style={{background:"#1e293b",border:"1px solid rgba(99,179,237,0.4)",borderRadius:6,color:"#63b3ed",padding:"3px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer",minWidth:140}}>
+                                  {[...allCatsIn,...allCatsOut].map(c=><option key={c} style={{background:'#1e293b',color:'#e2e8f0'}}>{c}</option>)}
+                                </select>
+                              ):(
+                                <span title="Click to reassign" style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8",cursor:"pointer",borderBottom:"1px dashed rgba(255,255,255,0.15)"}}>{tx.category} ✎</span>
+                              )}
+                            </td>
+                            <td style={{padding:"10px 18px",color:tx.amount>0?"#34d399":"#f87171",fontWeight:500}}>{fmtSigned(tx.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -409,14 +490,14 @@ function App(){
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
-              {income.map(item=><ItemRow key={item.id} item={item} cats={CAT_IN} onUpdate={u=>{ const next=income.map(i=>i.id===u.id?u:i); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=income.filter(i=>i.id!==item.id); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}/>)}
+              {income.map(item=><ItemRow key={item.id} item={item} cats={allCatsIn} onUpdate={u=>{ const next=income.map(i=>i.id===u.id?u:i); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=income.filter(i=>i.id!==item.id); setIncome(next); localStorage.setItem("income_streams",JSON.stringify(next)); }}/>)}
             </Section>
             <div style={{height:20}}/>
             <Section title="Expenses" color="#f87171" onAdd={()=>{ const next=[...expenses,{id:NID++,label:"",category:CAT_OUT[0],amount:0,frequency:"monthly",startDate:startOfMonth()}]; setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 140px 110px 120px 140px 34px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.08)",marginBottom:4}}>
                 {colH.map(h=><div key={h} style={{color:"#475569",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em"}}>{h}</div>)}
               </div>
-              {expenses.map(item=><ItemRow key={item.id} item={item} cats={CAT_OUT} onUpdate={u=>{ const next=expenses.map(i=>i.id===u.id?u:i); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=expenses.filter(i=>i.id!==item.id); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}/>)}
+              {expenses.map(item=><ItemRow key={item.id} item={item} cats={allCatsOut} onUpdate={u=>{ const next=expenses.map(i=>i.id===u.id?u:i); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=expenses.filter(i=>i.id!==item.id); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}/>)}
             </Section>
           </>
         )}
@@ -495,11 +576,11 @@ function App(){
                               <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
                               <td style={{padding:"12px 18px"}} onClick={e=>{ e.stopPropagation(); setEditingCat(tx.id===editingCat?null:tx.id); }}>
                                 {editingCat===tx.id?(
-                                  <select autoFocus value={tx.category}
-                                    onChange={e=>overrideCat(tx.id,e.target.value)}
-                                    onBlur={()=>setEditingCat(null)}
-                                    style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(99,179,237,0.4)",borderRadius:6,color:"#63b3ed",padding:"3px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>
-                                    {[...CAT_IN,...CAT_OUT].map(c=><option key={c}>{c}</option>)}
+                                  <select autoFocus size="1" value={tx.category}
+                                    onChange={e=>{ overrideCat(tx.id,e.target.value); }}
+                                    onBlur={e=>{ setTimeout(()=>setEditingCat(null),200); }}
+                                    style={{background:"#1e293b",border:"1px solid rgba(99,179,237,0.4)",borderRadius:6,color:"#63b3ed",padding:"3px 8px",fontSize:11,fontFamily:"inherit",cursor:"pointer",minWidth:140}}>
+                                    {[...allCatsIn,...allCatsOut].map(c=><option key={c} style={{background:'#1e293b',color:'#e2e8f0'}}>{c}</option>)}
                                   </select>
                                 ):(
                                   <span title="Click to reassign" style={{background:"rgba(255,255,255,0.06)",borderRadius:6,padding:"3px 9px",fontSize:11,color:"#94a3b8",cursor:"pointer",borderBottom:"1px dashed rgba(255,255,255,0.15)"}}>
@@ -642,6 +723,47 @@ function App(){
                     )}
                   </div>
                 </div>
+
+                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18,marginTop:16}}>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>Manage Categories</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+                    <div>
+                      <div style={{color:"#34d399",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Income Categories</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {allCatsIn.map(cat=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"7px 12px"}}>
+                            <span style={{fontSize:13,color:"#94a3b8"}}>{cat}</span>
+                            {customCatsIn.includes(cat)&&(
+                              <button onClick={()=>deleteCustomCat(cat,"income")} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{color:"#f87171",fontSize:11,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Expense Categories</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {allCatsOut.map(cat=>(
+                          <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"7px 12px"}}>
+                            <span style={{fontSize:13,color:"#94a3b8"}}>{cat}</span>
+                            {customCatsOut.includes(cat)&&(
+                              <button onClick={()=>deleteCustomCat(cat,"expense")} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",borderTop:"1px solid rgba(255,255,255,0.07)",paddingTop:14}}>
+                    <input value={newCatName} onChange={e=>setNewCatName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addCustomCat()} placeholder="New category name…" style={{...IS,flex:1,fontSize:13}}/>
+                    <select value={newCatType} onChange={e=>setNewCatType(e.target.value)} style={{...SS,width:120,fontSize:13}}>
+                      <option value="income">Income</option>
+                      <option value="expense">Expense</option>
+                    </select>
+                    <button onClick={addCustomCat} style={{background:"rgba(99,179,237,0.15)",border:"1px solid rgba(99,179,237,0.35)",color:"#63b3ed",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:13,fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Add</button>
+                  </div>
+                </div>
+
               </div>
             );
           })()

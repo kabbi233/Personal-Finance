@@ -79,10 +79,38 @@ function loadIncome(){  try{ const s=localStorage.getItem("income_streams");  re
 function loadExpenses(){ try{ const s=localStorage.getItem("expense_streams"); return s?JSON.parse(s):FALLBACK_EXPENSES; }catch{ return FALLBACK_EXPENSES; } }
 
 
+const ACCT_COLORS = ["#60a5fa","#34d399","#a78bfa","#f59e0b","#f472b6","#38bdf8","#fb923c","#4ade80"];
+
 const CAT_COLORS = [
   "#818cf8","#60a5fa","#34d399","#f59e0b","#f87171","#e879f9","#a78bfa","#38bdf8","#fb923c","#4ade80","#f472b6","#facc15"
 ];
 
+
+
+function AnimNum({value, prefix="$", decimals=2}){
+  const {useState,useEffect,useRef} = React;
+  const [display, setDisplay] = useState(0);
+  const prev = useRef(0);
+  useEffect(()=>{
+    const start = prev.current;
+    const end = value;
+    prev.current = end;
+    if(start===end) return;
+    const dur = 600;
+    const startTime = performance.now();
+    function step(now){
+      const p = Math.min((now-startTime)/dur,1);
+      const ease = 1-Math.pow(1-p,3);
+      setDisplay(start + (end-start)*ease);
+      if(p<1) requestAnimationFrame(step);
+      else setDisplay(end);
+    }
+    requestAnimationFrame(step);
+  },[value]);
+  const abs = Math.abs(display);
+  const str = prefix + abs.toLocaleString("en-US",{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
+  return <span>{str}</span>;
+}
 
 function CatDropdown({value, options, onChange, onClose}){
   const {useState,useEffect,useRef} = React;
@@ -157,7 +185,19 @@ function App(){
   const [dateTo,      setDateTo]      = useState("");
   const [statusFilter,setStatusFilter]= useState("all");
   const [editingCat,  setEditingCat]  = useState(null);
-  const [drilldown,    setDrilldown]    = useState(null); // 'income' | 'expenses' | null
+  const [drilldown,    setDrilldown]    = useState(null);
+  const [search,       setSearch]       = useState("");
+  const [groupByAcct,  setGroupByAcct]  = useState(false);
+  const [budgets,      setBudgets]      = useState(()=>{ try{ return JSON.parse(localStorage.getItem("budgets")||"{}"); }catch{ return {}; } });
+  const [editBudget,   setEditBudget]   = useState(null);
+  const [catDrillCat,  setCatDrillCat]  = useState(null);
+
+  function saveBudget(cat, val){
+    const next = {...budgets, [cat]: parseFloat(val)||0};
+    setBudgets(next);
+    localStorage.setItem("budgets", JSON.stringify(next));
+    setEditBudget(null);
+  }
   const [catOverrides,setCatOverrides]= useState(()=>{
     try{ return JSON.parse(localStorage.getItem("cat_overrides")||"{}"); }catch{ return {}; }
   });
@@ -223,6 +263,13 @@ function App(){
       .filter(([id])=>!excluded.has(id))
       .reduce((s,[,m])=>s+(m.available||0),0);
   },[accountMeta,excluded]);
+
+  const acctColorMap = useMemo(()=>{
+    const ids = Object.keys(accountMeta);
+    const map = {};
+    ids.forEach((id,i)=>{ map[id]=ACCT_COLORS[i%ACCT_COLORS.length]; });
+    return map;
+  },[accountMeta]);
 
   function saveEnrollments(list){
     setEnrollments(list);
@@ -391,14 +438,14 @@ function App(){
         {/* Summary Cards */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:28}}>
           {[
-            {label:"Avg Monthly Income",  value:fmt(projection.reduce((s,p)=>s+p.totalIn,0)/12),  color:"#34d399"},
-            {label:"Avg Monthly Expenses",value:fmt(projection.reduce((s,p)=>s+p.totalOut,0)/12), color:"#f87171"},
-            {label:"Avg Net / Month",     value:fmt(projection.reduce((s,p)=>s+p.net,0)/12),       color:projection.reduce((s,p)=>s+p.net,0)/12>=0?"#60a5fa":"#f87171"},
-            {label:"Projected (12 mo)",   value:fmt(projection[11]?.balance??0),                   color:(projection[11]?.balance??0)>=0?"#a78bfa":"#f87171"},
+            {label:"Avg Monthly Income",  raw:projection.reduce((s,p)=>s+p.totalIn,0)/12,  color:"#34d399"},
+            {label:"Avg Monthly Expenses",raw:projection.reduce((s,p)=>s+p.totalOut,0)/12, color:"#f87171"},
+            {label:"Avg Net / Month",     raw:projection.reduce((s,p)=>s+p.net,0)/12,       color:projection.reduce((s,p)=>s+p.net,0)/12>=0?"#60a5fa":"#f87171"},
+            {label:"Projected (12 mo)",   raw:projection[11]?.balance??0,                   color:(projection[11]?.balance??0)>=0?"#a78bfa":"#f87171"},
           ].map(c=>(
             <div key={c.label} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"18px 20px"}}>
               <div style={{color:"#64748b",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>{c.label}</div>
-              <div style={{fontSize:22,fontWeight:500,color:c.color}}>{c.value}</div>
+              <div style={{fontSize:22,fontWeight:500,color:c.color}}><AnimNum value={c.raw}/></div>
             </div>
           ))}
         </div>
@@ -559,6 +606,7 @@ function App(){
                   if(dateTo   && d > new Date(dateTo))   return false;
                 }
                 if(statusFilter!=="all" && (tx.status||"").toLowerCase()!==statusFilter) return false;
+                if(search.trim() && !(tx.description||"").toLowerCase().includes(search.trim().toLowerCase())) return false;
                 return true;
               });
               const sumIn  = filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
@@ -566,6 +614,10 @@ function App(){
               const sumNet = sumIn-sumOut;
               return(
                 <>
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search merchants…" style={{...IS,flex:1,fontSize:13}}/>
+                    <button onClick={()=>setGroupByAcct(g=>!g)} style={{background:groupByAcct?"rgba(167,139,250,0.15)":"rgba(255,255,255,0.04)",border:groupByAcct?"1px solid rgba(167,139,250,0.4)":"1px solid rgba(255,255,255,0.1)",color:groupByAcct?"#a78bfa":"#64748b",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit",whiteSpace:"nowrap"}}>By Account</button>
+                  </div>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["all","All"],["custom","Custom"]].map(([v,label])=>(
@@ -594,8 +646,8 @@ function App(){
                     <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>Loading transactions…</div>
                   ):filtered.length===0?(
                     <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>No transactions in this range</div>
-                  ):(
-                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto"}}>
+                  ):(()=>{
+                    const TxTable = ({rows})=>(
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                         <thead>
                           <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
@@ -605,7 +657,7 @@ function App(){
                           </tr>
                         </thead>
                         <tbody>
-                          {filtered.map((tx,i)=>(
+                          {rows.map((tx,i)=>(
                             <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
                               <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
                               <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
@@ -620,7 +672,9 @@ function App(){
                                   </span>
                                 )}
                               </td>
-                              <td style={{padding:"12px 18px",color:"#475569",fontSize:12}}>{tx.accountName}</td>
+                              <td style={{padding:"12px 18px"}}>
+                                <span style={{background:acctColorMap[tx.accountId]+"22",border:`1px solid ${acctColorMap[tx.accountId]}44`,color:acctColorMap[tx.accountId],borderRadius:6,padding:"3px 8px",fontSize:11,whiteSpace:"nowrap"}}>{tx.accountName}</span>
+                              </td>
                               <td style={{padding:"12px 18px"}}>
                                 {(()=>{
                                   const s = (tx.status||"unknown").toLowerCase();
@@ -639,16 +693,49 @@ function App(){
                           ))}
                         </tbody>
                       </table>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderTop:"1px solid rgba(255,255,255,0.07)"}}>
-                        <span style={{color:"#475569",fontSize:12}}>{filtered.length} transaction{filtered.length!==1?"s":""}</span>
-                        <div style={{display:"flex",gap:20}}>
-                          <span style={{color:"#34d399",fontSize:12}}>Income: +{fmt(sumIn)}</span>
-                          <span style={{color:"#f87171",fontSize:12}}>Expenses: -{fmt(sumOut)}</span>
-                          <span style={{color:sumNet>=0?"#60a5fa":"#f87171",fontSize:12,fontWeight:500}}>Net: {fmtSigned(sumNet)}</span>
+                    );
+                    if(!groupByAcct) return(
+                      <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto"}}>
+                        <TxTable rows={filtered}/>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderTop:"1px solid rgba(255,255,255,0.07)"}}>
+                          <span style={{color:"#475569",fontSize:12}}>{filtered.length} transaction{filtered.length!==1?"s":""}</span>
+                          <div style={{display:"flex",gap:20}}>
+                            <span style={{color:"#34d399",fontSize:12}}>Income: +{fmt(sumIn)}</span>
+                            <span style={{color:"#f87171",fontSize:12}}>Expenses: -{fmt(sumOut)}</span>
+                            <span style={{color:sumNet>=0?"#60a5fa":"#f87171",fontSize:12,fontWeight:500}}>Net: {fmtSigned(sumNet)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                    const byAcct = {};
+                    filtered.forEach(tx=>{ if(!byAcct[tx.accountId]) byAcct[tx.accountId]=[]; byAcct[tx.accountId].push(tx); });
+                    return(
+                      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                        {Object.entries(byAcct).map(([aid,rows])=>{
+                          const meta = accountMeta[aid]||{};
+                          const color = acctColorMap[aid]||"#94a3b8";
+                          const acctIn  = rows.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+                          const acctOut = rows.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+                          return(
+                            <div key={aid} style={{background:"rgba(255,255,255,0.03)",border:`1px solid ${color}33`,borderRadius:14,overflow:"auto"}}>
+                              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 18px",borderBottom:`1px solid ${color}22`}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
+                                  <span style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{meta.accountName||aid}</span>
+                                  <span style={{fontSize:11,color:"#475569"}}>{meta.institution||""}</span>
+                                </div>
+                                <div style={{display:"flex",gap:16,fontSize:12}}>
+                                  <span style={{color:"#34d399"}}>+{fmt(acctIn)}</span>
+                                  <span style={{color:"#f87171"}}>-{fmt(acctOut)}</span>
+                                </div>
+                              </div>
+                              <TxTable rows={rows}/>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </>
               );
             })()}
@@ -720,17 +807,50 @@ function App(){
                       <div style={{color:"#475569",fontSize:13}}>No expenses in this period</div>
                     ):(
                       <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                        {expRows.map(([cat,amt],i)=>(
-                          <div key={cat}>
-                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                              <span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span>
-                              <span style={{fontSize:12,color:"#e2e8f0",fontWeight:500}}>{fmt(amt)} <span style={{color:"#64748b",fontWeight:400}}>{(amt/totalOut*100).toFixed(1)}%</span></span>
+                        {expRows.map(([cat,amt],i)=>{
+                          const budget = budgets[cat]||0;
+                          const pct = budget>0 ? Math.min(amt/budget*100,100) : (amt/maxExp*100);
+                          const overBudget = budget>0 && amt>budget;
+                          const nearBudget = budget>0 && amt/budget>=0.8 && !overBudget;
+                          const barColor = overBudget?"#f87171":nearBudget?"#f59e0b":CAT_COLORS[i%CAT_COLORS.length];
+                          return(
+                            <div key={cat} style={{cursor:"pointer"}} onClick={()=>setCatDrillCat(catDrillCat===cat?null:cat)}>
+                              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,alignItems:"center"}}>
+                                <span style={{fontSize:12,color:"#94a3b8"}}>{cat} {overBudget&&<span style={{color:"#f87171",fontSize:10}}>● over</span>}{nearBudget&&<span style={{color:"#f59e0b",fontSize:10}}>● near</span>}</span>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  {editBudget===cat?(
+                                    <input autoFocus type="number" defaultValue={budget||""} placeholder="budget"
+                                      onBlur={e=>saveBudget(cat,e.target.value)}
+                                      onKeyDown={e=>{ if(e.key==="Enter") saveBudget(cat,e.target.value); if(e.key==="Escape") setEditBudget(null); }}
+                                      onClick={e=>e.stopPropagation()}
+                                      style={{width:80,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(99,179,237,0.4)",borderRadius:5,color:"#63b3ed",padding:"2px 6px",fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+                                  ):(
+                                    <span onClick={e=>{ e.stopPropagation(); setEditBudget(cat); }} style={{fontSize:11,color:"#475569",cursor:"pointer",borderBottom:"1px dashed rgba(255,255,255,0.1)"}}>
+                                      {budget>0?`/ ${fmt(budget)}`:"+ budget"}
+                                    </span>
+                                  )}
+                                  <span style={{fontSize:12,color:overBudget?"#f87171":"#e2e8f0",fontWeight:500}}>{fmt(amt)} <span style={{color:"#64748b",fontWeight:400}}>{(amt/totalOut*100).toFixed(1)}%</span></span>
+                                </div>
+                              </div>
+                              <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3,marginBottom:4}}>
+                                <div style={{width:`${pct.toFixed(1)}%`,height:"100%",background:barColor,borderRadius:3,transition:"width 0.4s ease"}}/>
+                              </div>
+                              {catDrillCat===cat&&(
+                                <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 0",marginTop:4,marginBottom:4}} onClick={e=>e.stopPropagation()}>
+                                  {filtered.filter(t=>t.amount<0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
+                                    <div key={tx.id||j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 12px",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                        <span style={{fontSize:11,color:"#475569"}}>{tx.date}</span>
+                                        <span style={{fontSize:12,color:"#94a3b8",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</span>
+                                      </div>
+                                      <span style={{fontSize:12,color:"#f87171",fontWeight:500}}>{fmtSigned(tx.amount)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                            <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
-                              <div style={{width:`${(amt/maxExp*100).toFixed(1)}%`,height:"100%",background:CAT_COLORS[i%CAT_COLORS.length],borderRadius:3}}/>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -741,19 +861,69 @@ function App(){
                     ):(
                       <div style={{display:"flex",flexDirection:"column",gap:12}}>
                         {incRows.map(([cat,amt],i)=>(
-                          <div key={cat}>
+                          <div key={cat} style={{cursor:"pointer"}} onClick={()=>setCatDrillCat(catDrillCat===cat?null:cat)}>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
                               <span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span>
                               <span style={{fontSize:12,color:"#e2e8f0",fontWeight:500}}>{fmt(amt)} <span style={{color:"#64748b",fontWeight:400}}>{(amt/totalIn*100).toFixed(1)}%</span></span>
                             </div>
-                            <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
-                              <div style={{width:`${(amt/maxInc*100).toFixed(1)}%`,height:"100%",background:CAT_COLORS[(i+5)%CAT_COLORS.length],borderRadius:3}}/>
+                            <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3,marginBottom:4}}>
+                              <div style={{width:`${(amt/maxInc*100).toFixed(1)}%`,height:"100%",background:CAT_COLORS[(i+5)%CAT_COLORS.length],borderRadius:3,transition:"width 0.4s ease"}}/>
                             </div>
+                            {catDrillCat===cat&&(
+                              <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 0",marginTop:4,marginBottom:4}} onClick={e=>e.stopPropagation()}>
+                                {filtered.filter(t=>t.amount>0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
+                                  <div key={tx.id||j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 12px",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                      <span style={{fontSize:11,color:"#475569"}}>{tx.date}</span>
+                                      <span style={{fontSize:12,color:"#94a3b8",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</span>
+                                    </div>
+                                    <span style={{fontSize:12,color:"#34d399",fontWeight:500}}>{fmtSigned(tx.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18,marginTop:16}}>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>Month over Month</div>
+                  {(()=>{
+                    const prevMonth = CM===0?11:CM-1;
+                    const prevYear  = CM===0?CY-1:CY;
+                    const thisMonthTx = includedTx.filter(t=>{ const d=new Date(t.date); return d.getMonth()===CM&&d.getFullYear()===CY&&t.amount<0; });
+                    const lastMonthTx = includedTx.filter(t=>{ const d=new Date(t.date); return d.getMonth()===prevMonth&&d.getFullYear()===prevYear&&t.amount<0; });
+                    const allCats = [...new Set([...thisMonthTx.map(t=>t.category),...lastMonthTx.map(t=>t.category)])];
+                    const thisByCat = {}; thisMonthTx.forEach(t=>{ thisByCat[t.category]=(thisByCat[t.category]||0)+Math.abs(t.amount); });
+                    const lastByCat = {}; lastMonthTx.forEach(t=>{ lastByCat[t.category]=(lastByCat[t.category]||0)+Math.abs(t.amount); });
+                    if(allCats.length===0) return <div style={{color:"#475569",fontSize:13}}>Not enough data for comparison</div>;
+                    return(
+                      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 100px 100px 80px",gap:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.07)"}}>
+                          {["Category",MONTHS[prevMonth],MONTHS[CM],"Change"].map(h=><span key={h} style={{fontSize:11,color:"#475569",textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</span>)}
+                        </div>
+                        {allCats.sort((a,b)=>(thisByCat[b]||0)-(thisByCat[a]||0)).map(cat=>{
+                          const thisAmt = thisByCat[cat]||0;
+                          const lastAmt = lastByCat[cat]||0;
+                          const diff = thisAmt-lastAmt;
+                          const pctChg = lastAmt>0 ? ((diff/lastAmt)*100) : null;
+                          return(
+                            <div key={cat} style={{display:"grid",gridTemplateColumns:"1fr 100px 100px 80px",gap:8,alignItems:"center"}}>
+                              <span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span>
+                              <span style={{fontSize:12,color:"#64748b"}}>{lastAmt>0?fmt(lastAmt):"—"}</span>
+                              <span style={{fontSize:12,color:"#e2e8f0",fontWeight:500}}>{thisAmt>0?fmt(thisAmt):"—"}</span>
+                              <span style={{fontSize:12,color:diff>0?"#f87171":diff<0?"#34d399":"#64748b",fontWeight:500}}>
+                                {diff===0?"—":(diff>0?"▲":"▼")+" "+(pctChg!==null?Math.abs(pctChg).toFixed(0)+"%":fmt(Math.abs(diff)))}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18,marginTop:16}}>

@@ -11,13 +11,20 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0f1a; color: #e2e8f0; font-family: 'DM Mono', 'Courier New', monospace; }
+    body { background: #080d18; color: #e2e8f0; font-family: 'DM Mono', 'Courier New', monospace; }
     input:focus, select:focus { border-color: rgba(99,179,237,0.5) !important; box-shadow: 0 0 0 2px rgba(99,179,237,0.1); outline: none; }
     input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     select option { background: #1e293b; color: #e2e8f0; }
+    body::before { content:''; position:fixed; inset:0; z-index:-1; background: radial-gradient(ellipse 80% 60% at 10% 20%, rgba(15,70,90,0.35) 0%, transparent 60%), radial-gradient(ellipse 60% 50% at 85% 80%, rgba(60,30,100,0.3) 0%, transparent 55%), #080d18; animation: meshShift 18s ease-in-out infinite alternate; }
+    @keyframes meshShift { 0% { filter: hue-rotate(0deg) brightness(1); } 50% { filter: hue-rotate(8deg) brightness(1.04); } 100% { filter: hue-rotate(-5deg) brightness(0.97); } }
+    .glass-card { background: rgba(255,255,255,0.045) !important; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.09) !important; box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06); }
+    .tab-content { animation: fadeInUp 0.18s ease; }
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
   </style>
 </head>
 <body>
@@ -292,7 +299,17 @@ function App(){
   const [loadingTx,    setLoadingTx]    = useState(false);
   const [txError,      setTxError]      = useState(null);
   const [loadingBal,   setLoadingBal]   = useState(false);
-  const [lastSync,     setLastSync]     = useState(null);
+  const [lastSync,      setLastSync]      = useState(null);
+  const [accountNames,  setAccountNames]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem("account_names")||"{}"); }catch{ return {}; } });
+  const [editAcctName,  setEditAcctName]  = useState(null);
+
+  function saveAcctName(id, name){
+    const next = {...accountNames, [id]: name.trim()||accountMeta[id]?.accountName||id};
+    setAccountNames(next);
+    localStorage.setItem("account_names", JSON.stringify(next));
+    setEditAcctName(null);
+  }
+  function getAcctName(id, fallback){ return accountNames[id]||fallback; }
   const tcRef = useRef(null);
 
   // Derived: starting balance = sum of included account balances
@@ -513,7 +530,7 @@ function App(){
             {label:"Avg Net / Month",     raw:projection.reduce((s,p)=>s+p.net,0)/12,       color:projection.reduce((s,p)=>s+p.net,0)/12>=0?"#60a5fa":"#f87171"},
             {label:"Projected (12 mo)",   raw:projection[11]?.balance??0,                   color:(projection[11]?.balance??0)>=0?"#a78bfa":"#f87171"},
           ].map(c=>(
-            <div key={c.label} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"18px 20px"}}>
+            <div key={c.label} className="glass-card" style={{borderRadius:12,padding:"18px 20px"}}>
               <div style={{color:"#64748b",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>{c.label}</div>
               <div style={{fontSize:22,fontWeight:500,color:c.color}}><AnimNum value={c.raw}/></div>
             </div>
@@ -614,7 +631,7 @@ function App(){
         </div>
 
         {/* Planner Tab */}
-        {activeTab==="planner"&&(
+        {activeTab==="planner"&&(<div className="tab-content">
           <>
             <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,overflow:"auto",marginBottom:24}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
@@ -652,11 +669,10 @@ function App(){
               </div>
               {expenses.map(item=><ItemRow key={item.id} item={item} cats={allCatsOut} onUpdate={u=>{ const next=expenses.map(i=>i.id===u.id?u:i); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }} onDelete={()=>{ const next=expenses.filter(i=>i.id!==item.id); setExpenses(next); localStorage.setItem("expense_streams",JSON.stringify(next)); }}/>)}
             </Section>
-          </>
-        )}
+          </></div>)}
 
         {/* Transactions Tab */}
-        {activeTab==="actual"&&(
+        {activeTab==="actual"&&(<div className="tab-content">
           <div>
             {enrollments.length===0?(
               <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569"}}>
@@ -673,7 +689,7 @@ function App(){
                 if(datePreset==="90d") return (now-d)<=90*86400000;
                 if(datePreset==="180d") return (now-d)<=180*86400000;
                 if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
-                if(datePreset==="today") return d.toDateString()===now.toDateString();
+                if(datePreset==="today"){ const td=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0"); return tx.date===td; }
                 if(datePreset==="custom"){
                   if(dateFrom && d < new Date(dateFrom)) return false;
                   if(dateTo   && d > new Date(dateTo))   return false;
@@ -716,7 +732,18 @@ function App(){
                     })}
                   </div>
                   {loadingTx?(
-                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>Loading transactions…</div>
+                    <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"20px 18px"}}>
+                      {[1,2,3,4,5,6].map(i=>(
+                        <div key={i} style={{display:"grid",gridTemplateColumns:"80px 1fr 100px 120px 60px 80px",gap:12,alignItems:"center",padding:"12px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                          <div className="skeleton" style={{height:12}}/>
+                          <div className="skeleton" style={{height:12}}/>
+                          <div className="skeleton" style={{height:20,borderRadius:10}}/>
+                          <div className="skeleton" style={{height:20,borderRadius:10}}/>
+                          <div className="skeleton" style={{height:20,borderRadius:10}}/>
+                          <div className="skeleton" style={{height:12}}/>
+                        </div>
+                      ))}
+                    </div>
                   ):filtered.length===0?(
                     <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569",fontSize:13}}>No transactions in this range</div>
                   ):(()=>{
@@ -746,7 +773,7 @@ function App(){
                                 )}
                               </td>
                               <td style={{padding:"12px 18px"}}>
-                                <span style={{background:acctColorMap[tx.accountId]+"22",border:`1px solid ${acctColorMap[tx.accountId]}44`,color:acctColorMap[tx.accountId],borderRadius:6,padding:"3px 8px",fontSize:11,whiteSpace:"nowrap"}}>{tx.accountName}</span>
+                                <span style={{background:acctColorMap[tx.accountId]+"22",border:`1px solid ${acctColorMap[tx.accountId]}44`,color:acctColorMap[tx.accountId],borderRadius:6,padding:"3px 8px",fontSize:11,whiteSpace:"nowrap"}}>{getAcctName(tx.accountId,tx.accountName)}</span>
                               </td>
                               <td style={{padding:"12px 18px"}}>
                                 {(()=>{
@@ -787,6 +814,7 @@ function App(){
                         {Object.entries(byAcct).map(([aid,rows])=>{
                           const meta = accountMeta[aid]||{};
                           const color = acctColorMap[aid]||"#94a3b8";
+                          const displayName = getAcctName(aid, meta.accountName||aid);
                           const acctIn  = rows.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
                           const acctOut = rows.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
                           return(
@@ -794,7 +822,7 @@ function App(){
                               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 18px",borderBottom:`1px solid ${color}22`}}>
                                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                                   <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
-                                  <span style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{meta.accountName||aid}</span>
+                                  <span style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{displayName}</span>
                                   <span style={{fontSize:11,color:"#475569"}}>{meta.institution||""}</span>
                                 </div>
                                 <div style={{display:"flex",gap:16,fontSize:12}}>
@@ -813,11 +841,11 @@ function App(){
               );
             })()}
           </div>
-        )}
+        </div>)}
 
 
         {/* Categories Tab */}
-        {activeTab==="categories"&&(
+        {activeTab==="categories"&&(<div className="tab-content">
           (()=>{
             const now = new Date();
             const filtered = includedTx.filter(tx=>{
@@ -827,7 +855,7 @@ function App(){
               if(datePreset==="90d") return (now-d)<=90*86400000;
               if(datePreset==="180d") return (now-d)<=180*86400000;
                 if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
-                if(datePreset==="today") return d.toDateString()===now.toDateString();
+                if(datePreset==="today"){ const td=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0"); return tx.date===td; }
               if(datePreset==="custom"){
                 if(dateFrom && d < new Date(dateFrom)) return false;
                 if(dateTo   && d > new Date(dateTo))   return false;
@@ -1086,10 +1114,10 @@ function App(){
               </div>
             );
           })()
-        )}
+        </div>)}
 
         {/* Accounts Tab */}
-        {activeTab==="accounts"&&(
+        {activeTab==="accounts"&&(<div className="tab-content">
           <div>
             {Object.keys(accountMeta).length===0?(
               <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569"}}>
@@ -1120,7 +1148,16 @@ function App(){
                         <div style={{display:"flex",alignItems:"center",gap:14}}>
                           <div style={{width:38,height:38,borderRadius:10,background:isExcluded?"rgba(255,255,255,0.05)":"rgba(52,211,153,0.1)",border:`1px solid ${isExcluded?"rgba(255,255,255,0.1)":"rgba(52,211,153,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏦</div>
                           <div>
-                            <div style={{fontSize:14,fontWeight:500,color:isExcluded?"#94a3b8":"#e2e8f0"}}>{meta.accountName}</div>
+                            {editAcctName===id?(
+                              <input autoFocus defaultValue={getAcctName(id,meta.accountName||"")}
+                                onBlur={e=>saveAcctName(id,e.target.value)}
+                                onKeyDown={e=>{ if(e.key==="Enter") saveAcctName(id,e.target.value); if(e.key==="Escape") setEditAcctName(null); }}
+                                style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(99,179,237,0.4)",borderRadius:6,color:"#63b3ed",padding:"3px 10px",fontSize:14,fontFamily:"inherit",outline:"none",width:200}}/>
+                            ):(
+                              <div onClick={()=>setEditAcctName(id)} style={{fontSize:14,fontWeight:500,color:isExcluded?"#94a3b8":"#e2e8f0",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                                {getAcctName(id,meta.accountName)} <span style={{fontSize:10,color:"#475569"}}>✎</span>
+                              </div>
+                            )}
                             <div style={{fontSize:11,color:"#475569",marginTop:2}}>{meta.institution}{meta.lastFour?` · ••••${meta.lastFour}`:""}</div>
                           </div>
                         </div>
@@ -1150,9 +1187,9 @@ function App(){
               </>
             )}
           </div>
-        )}
+        </div>)}
         {/* Chart Tab */}
-        {activeTab==="chart"&&(
+        {activeTab==="chart"&&(<div className="tab-content">
           <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"24px 20px"}}>
             <div style={{color:"#64748b",fontSize:11,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:20}}>Projected Running Balance</div>
             <div style={{display:"flex",alignItems:"flex-end",gap:6,height:200}}>
@@ -1169,7 +1206,7 @@ function App(){
               })}
             </div>
           </div>
-        )}
+        </div>)}
 
       </div>
     </div>

@@ -205,8 +205,8 @@ function App(){
   const [customCatsOut, setCustomCatsOut] = useState(()=>{ try{ const s=localStorage.getItem("custom_cats_out"); return s?JSON.parse(s):[]; }catch{ return []; } });
   const [newCatName,    setNewCatName]    = useState("");
   const [newCatType,    setNewCatType]    = useState("expense");
-  const [hiddenCatsIn]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_in")||"[]"); }catch{ return []; } });
-  const [hiddenCatsOut] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_out")||"[]"); }catch{ return []; } });
+  const [hiddenCatsIn,  setHiddenCatsIn]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_in")||"[]"); }catch{ return []; } });
+  const [hiddenCatsOut, setHiddenCatsOut] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_out")||"[]"); }catch{ return []; } });
   const allCatsIn  = useMemo(()=>[...CAT_IN.filter(c=>!hiddenCatsIn.includes(c)),  ...customCatsIn],  [customCatsIn,  hiddenCatsIn]);
   const allCatsOut = useMemo(()=>[...CAT_OUT.filter(c=>!hiddenCatsOut.includes(c)), ...customCatsOut], [customCatsOut, hiddenCatsOut]);
 
@@ -223,20 +223,23 @@ function App(){
   }
   function deleteCustomCat(name, type){
     if(type==="income"){
-      // remove from custom list if present, or add to hidden defaults list
       const nextCustom = customCatsIn.filter(c=>c!==name);
-      setCustomCatsIn(nextCustom); localStorage.setItem("custom_cats_in", JSON.stringify(nextCustom));
-      // also filter allCatsIn by rebuilding from scratch excluding name
-      // We track hidden defaults separately
-      const hiddenKey = "hidden_cats_in";
-      const hidden = JSON.parse(localStorage.getItem(hiddenKey)||"[]");
-      if(!hidden.includes(name)){ const next=[...hidden,name]; localStorage.setItem(hiddenKey,JSON.stringify(next)); }
+      setCustomCatsIn(nextCustom);
+      localStorage.setItem("custom_cats_in", JSON.stringify(nextCustom));
+      if(CAT_IN.includes(name)){
+        const next=[...hiddenCatsIn, name];
+        setHiddenCatsIn(next);
+        localStorage.setItem("hidden_cats_in", JSON.stringify(next));
+      }
     } else {
       const nextCustom = customCatsOut.filter(c=>c!==name);
-      setCustomCatsOut(nextCustom); localStorage.setItem("custom_cats_out", JSON.stringify(nextCustom));
-      const hiddenKey = "hidden_cats_out";
-      const hidden = JSON.parse(localStorage.getItem(hiddenKey)||"[]");
-      if(!hidden.includes(name)){ const next=[...hidden,name]; localStorage.setItem(hiddenKey,JSON.stringify(next)); }
+      setCustomCatsOut(nextCustom);
+      localStorage.setItem("custom_cats_out", JSON.stringify(nextCustom));
+      if(CAT_OUT.includes(name)){
+        const next=[...hiddenCatsOut, name];
+        setHiddenCatsOut(next);
+        localStorage.setItem("hidden_cats_out", JSON.stringify(next));
+      }
     }
   }
 
@@ -837,7 +840,7 @@ function App(){
                               </div>
                               {catDrillCat===cat&&(
                                 <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 0",marginTop:4,marginBottom:4}} onClick={e=>e.stopPropagation()}>
-                                  {filtered.filter(t=>t.amount<0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
+                                  {includedTx.filter(t=>t.amount<0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
                                     <div key={tx.id||j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 12px",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
                                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                                         <span style={{fontSize:11,color:"#475569"}}>{tx.date}</span>
@@ -871,7 +874,7 @@ function App(){
                             </div>
                             {catDrillCat===cat&&(
                               <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 0",marginTop:4,marginBottom:4}} onClick={e=>e.stopPropagation()}>
-                                {filtered.filter(t=>t.amount>0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
+                                {includedTx.filter(t=>t.amount>0&&t.category===cat).sort((a,b)=>new Date(b.date)-new Date(a.date)).map((tx,j)=>(
                                   <div key={tx.id||j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 12px",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
                                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                                       <span style={{fontSize:11,color:"#475569"}}>{tx.date}</span>

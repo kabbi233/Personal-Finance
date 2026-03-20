@@ -295,28 +295,21 @@ function App(){
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>Cash Flow Planner</div>
             <div style={{color:"#64748b",fontSize:13,marginTop:4}}>12-month projection + live bank data</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            {!accessToken?(
-              <button onClick={openConnect} style={{background:"rgba(99,179,237,0.15)",border:"1px solid rgba(99,179,237,0.35)",color:"#63b3ed",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
-                🏦 Connect Bank
-              </button>
-            ):(
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(52,211,153,0.1)",border:"1px solid rgba(52,211,153,0.25)",borderRadius:10,padding:"9px 14px"}}>
-                  <div style={{width:7,height:7,borderRadius:"50%",background:"#34d399"}}/>
-                  <span style={{color:"#34d399",fontSize:12}}>Bank Connected</span>
-                  {loadingTx&&<span style={{color:"#64748b",fontSize:11,marginLeft:4}}>syncing…</span>}
-                </div>
-                <button onClick={()=>fetchTx(accessToken)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",color:"#94a3b8",borderRadius:8,padding:"9px 12px",cursor:"pointer",fontSize:14,fontFamily:"inherit"}} title="Refresh">↻</button>
-                <button onClick={disconnect} style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",color:"#f87171",borderRadius:8,padding:"9px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Disconnect</button>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <button onClick={openConnect} style={{background:"rgba(99,179,237,0.15)",border:"1px solid rgba(99,179,237,0.35)",color:"#63b3ed",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+              + Connect Bank
+            </button>
+            {enrollments.length>0&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(52,211,153,0.1)",border:"1px solid rgba(52,211,153,0.25)",borderRadius:10,padding:"9px 14px"}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:"#34d399"}}/>
+                <span style={{color:"#34d399",fontSize:12}}>{enrollments.length} bank{enrollments.length>1?"s":""} connected</span>
+                {(loadingTx||loadingBal)&&<span style={{color:"#64748b",fontSize:11,marginLeft:4}}>syncing…</span>}
               </div>
             )}
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{color:"#64748b",fontSize:13}}>Starting balance</span>
-              <div style={{position:"relative"}}>
-                <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",pointerEvents:"none"}}>$</span>
-                <input type="number" value={startBal} onChange={e=>setStartBal(parseFloat(e.target.value)||0)} style={{...IS,paddingLeft:24,width:130,fontSize:15}}/>
-              </div>
+            <button onClick={()=>fetchAllData(enrollments)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",color:"#94a3b8",borderRadius:8,padding:"9px 12px",cursor:"pointer",fontSize:14,fontFamily:"inherit"}} title="Refresh all">↻</button>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"9px 14px"}}>
+              <span style={{color:"#64748b",fontSize:12}}>Balance:</span>
+              <span style={{color:"#e2e8f0",fontSize:13,fontWeight:500}}>{loadingBal?"…":fmt(startBal)}</span>
             </div>
           </div>
         </div>
@@ -343,7 +336,7 @@ function App(){
         </div>
 
         {/* Actual vs Projected (this month) */}
-        {accessToken&&transactions.length>0&&(
+        {enrollments.length>0&&includedTx.length>0&&(
           <div style={{background:"rgba(99,179,237,0.05)",border:"1px solid rgba(99,179,237,0.15)",borderRadius:14,padding:"20px 24px",marginBottom:28}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>This Month — Actual vs Projected</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
@@ -429,11 +422,11 @@ function App(){
         {/* Transactions Tab */}
         {activeTab==="actual"&&(
           <div>
-            {!accessToken?(
+            {enrollments.length===0?(
               <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:48,textAlign:"center",color:"#475569"}}>
                 <div style={{fontSize:32,marginBottom:12}}>🏦</div>
                 <div style={{fontSize:15,marginBottom:8,color:"#64748b"}}>No bank connected</div>
-                <div style={{fontSize:13}}>Click "Connect Bank" above to link your accounts</div>
+                <div style={{fontSize:13}}>Click "+ Connect Bank" to link your accounts</div>
               </div>
             ):(()=>{
               const now = new Date();

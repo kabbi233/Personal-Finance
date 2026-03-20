@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cash Flow Planner</title>
+  <title>SikaSem</title>
   <script src="https://cdn.teller.io/connect/connect.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -56,6 +56,7 @@ function fmtSigned(n){ return (n>0?"+":"")+(n<0?"-":"")+"$"+Math.abs(n).toLocale
 
 const CAT_IN  = ["Ivory Maids","Detailing","AI/Reactivation","W-2 Job","Other Income"];
 const CAT_OUT = ["Supplies","Marketing","Software","Rent/Utilities","Personal","Taxes","Payroll","Other Expense"];
+const LOCKED_CATS = ["Savings"];
 const FREQ    = {once:"One-time",weekly:"Weekly",biweekly:"Biweekly",monthly:"Monthly"};
 
 const IS = {
@@ -191,6 +192,39 @@ function App(){
   const [budgets,      setBudgets]      = useState(()=>{ try{ return JSON.parse(localStorage.getItem("budgets")||"{}"); }catch{ return {}; } });
   const [editBudget,   setEditBudget]   = useState(null);
   const [catDrillCat,  setCatDrillCat]  = useState(null);
+  const [merchantRules, setMerchantRules] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("merchant_rules")||"{}"); }catch{ return {}; } });
+  const [rulePrompt,    setRulePrompt]    = useState(null); // {txId, keyword, category}
+  const [ruleTestInput, setRuleTestInput] = useState("");
+
+  function cleanKeyword(desc){
+    return (desc||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim().split(" ").slice(0,3).join(" ");
+  }
+
+  function applyRulesToTx(txList, rules){
+    return txList.map(tx=>{
+      const desc = (tx.description||"").toLowerCase();
+      for(const [kw, cat] of Object.entries(rules)){
+        if(desc.includes(kw)) return {...tx, category:cat, autoTagged:kw};
+      }
+      return tx;
+    });
+  }
+
+  function saveRule(keyword, category){
+    const next = {...merchantRules, [keyword.toLowerCase().trim()]: category};
+    setMerchantRules(next);
+    localStorage.setItem("merchant_rules", JSON.stringify(next));
+    setTransactions(prev => applyRulesToTx(prev, next));
+    setRulePrompt(null);
+  }
+
+  function deleteRule(keyword){
+    const next = {...merchantRules};
+    delete next[keyword];
+    setMerchantRules(next);
+    localStorage.setItem("merchant_rules", JSON.stringify(next));
+    setTransactions(prev => applyRulesToTx(prev, next));
+  }
 
   function saveBudget(cat, val){
     const next = {...budgets, [cat]: parseFloat(val)||0};
@@ -208,7 +242,7 @@ function App(){
   const [hiddenCatsIn,  setHiddenCatsIn]  = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_in")||"[]"); }catch{ return []; } });
   const [hiddenCatsOut, setHiddenCatsOut] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("hidden_cats_out")||"[]"); }catch{ return []; } });
   const allCatsIn  = useMemo(()=>[...CAT_IN.filter(c=>!hiddenCatsIn.includes(c)),  ...customCatsIn],  [customCatsIn,  hiddenCatsIn]);
-  const allCatsOut = useMemo(()=>[...CAT_OUT.filter(c=>!hiddenCatsOut.includes(c)), ...customCatsOut], [customCatsOut, hiddenCatsOut]);
+  const allCatsOut = useMemo(()=>[...CAT_OUT.filter(c=>!hiddenCatsOut.includes(c)), ...customCatsOut, ...LOCKED_CATS], [customCatsOut, hiddenCatsOut]);
 
   function addCustomCat(){
     if(!newCatName.trim()) return;
@@ -222,6 +256,7 @@ function App(){
     setNewCatName("");
   }
   function deleteCustomCat(name, type){
+    if(LOCKED_CATS.includes(name)) return;
     if(type==="income"){
       const nextCustom = customCatsIn.filter(c=>c!==name);
       setCustomCatsIn(nextCustom);
@@ -289,6 +324,11 @@ function App(){
     localStorage.setItem("cat_overrides", JSON.stringify(updated));
     setEditingCat(null);
     setTransactions(prev => prev.map(t => t.id===txId ? {...t, category:newCat} : t));
+    const tx = transactions.find(t=>t.id===txId);
+    if(tx){
+      const kw = cleanKeyword(tx.description);
+      setRulePrompt({txId, keyword:kw, category:newCat, description:tx.description});
+    }
   }
 
   // Init Teller Connect
@@ -342,7 +382,7 @@ function App(){
       }
       setAccountMeta(newMeta);
       allTx.sort((a,b)=>new Date(b.date)-new Date(a.date));
-      setTransactions(allTx);
+      setTransactions(applyRulesToTx(allTx, merchantRules));
       setLastSync(new Date());
     }catch(e){ setTxError(e.message); }
     finally{ setLoadingTx(false); setLoadingBal(false); }
@@ -370,12 +410,15 @@ function App(){
 
   const projection = useMemo(()=>{
     let bal = startBal;
+    let sav = 0;
     return months.map(({label,month,year})=>{
       const totalIn  = income.reduce((s,i)=>s+amtForMonth(i,month,year),0);
       const totalOut = expenses.reduce((s,e)=>s+amtForMonth(e,month,year),0);
+      const savingsAmt = expenses.filter(e=>e.category==="Savings").reduce((s,e)=>s+amtForMonth(e,month,year),0);
       const net = totalIn-totalOut;
       bal += net;
-      return {label,totalIn,totalOut,net,balance:bal};
+      sav += savingsAmt;
+      return {label,totalIn,totalOut,net,balance:bal,savings:sav};
     });
   },[income,expenses,months,startBal]);
 
@@ -410,8 +453,8 @@ function App(){
         {/* Header */}
         <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",marginBottom:28,flexWrap:"wrap",gap:16}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>Cash Flow Planner</div>
-            <div style={{color:"#64748b",fontSize:13,marginTop:4}}>12-month projection + live bank data</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>SikaSem</div>
+            <div style={{color:"#64748b",fontSize:13,marginTop:4}}>your money, your terms</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <button onClick={openConnect} style={{background:"rgba(99,179,237,0.15)",border:"1px solid rgba(99,179,237,0.35)",color:"#63b3ed",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
@@ -432,6 +475,30 @@ function App(){
           </div>
         </div>
 
+
+        {/* Merchant Rule Prompt */}
+        {rulePrompt&&(
+          <div style={{background:"rgba(99,179,237,0.08)",border:"1px solid rgba(99,179,237,0.25)",borderRadius:12,padding:"16px 20px",marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+            <div>
+              <div style={{fontSize:13,color:"#e2e8f0",marginBottom:4}}>
+                Apply <span style={{color:"#63b3ed",fontWeight:500}}>"{rulePrompt.category}"</span> to all transactions matching <span style={{color:"#a78bfa",fontWeight:500}}>"{rulePrompt.keyword}"</span>?
+              </div>
+              <div style={{fontSize:11,color:"#475569"}}>This will update all matching transactions in your history automatically.</div>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input value={rulePrompt.keyword} onChange={e=>setRulePrompt({...rulePrompt,keyword:e.target.value})}
+                style={{...IS,width:160,fontSize:12,padding:"5px 10px"}} placeholder="keyword"/>
+              <button onClick={()=>saveRule(rulePrompt.keyword,rulePrompt.category)}
+                style={{background:"rgba(52,211,153,0.15)",border:"1px solid rgba(52,211,153,0.3)",color:"#34d399",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                ⚡ Yes, create rule
+              </button>
+              <button onClick={()=>setRulePrompt(null)}
+                style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"#64748b",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                Just this one
+              </button>
+            </div>
+          </div>
+        )}
         {txError&&(
           <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:10,padding:"12px 16px",marginBottom:20,color:"#f87171",fontSize:13}}>
             ⚠️ Bank sync error: {txError}
@@ -553,7 +620,7 @@ function App(){
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                 <thead>
                   <tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-                    {["Month","Income","Expenses","Net","Running Balance"].map(h=>(
+                    {["Month","Income","Expenses","Net","Savings","Running Balance"].map(h=>(
                       <th key={h} style={{padding:"14px 18px",textAlign:"left",color:"#475569",fontWeight:500,fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
                     ))}
                   </tr>
@@ -565,6 +632,7 @@ function App(){
                       <td style={{padding:"13px 18px",color:"#34d399"}}>{fmt(row.totalIn)}</td>
                       <td style={{padding:"13px 18px",color:"#f87171"}}>{fmt(row.totalOut)}</td>
                       <td style={{padding:"13px 18px",color:row.net>=0?"#60a5fa":"#f87171",fontWeight:500}}>{row.net>=0?"+":""}{fmt(row.net)}</td>
+                      <td style={{padding:"13px 18px",color:"#a78bfa",fontWeight:500}}>{fmt(row.savings)}</td>
                       <td style={{padding:"13px 18px",color:row.balance>=0?"#e2e8f0":"#f87171",fontWeight:500}}>{fmt(row.balance)}</td>
                     </tr>
                   ))}
@@ -603,8 +671,9 @@ function App(){
                 if(datePreset==="7d")  return (now-d)<=7*86400000;
                 if(datePreset==="30d") return (now-d)<=30*86400000;
                 if(datePreset==="90d") return (now-d)<=90*86400000;
+                if(datePreset==="180d") return (now-d)<=180*86400000;
                 if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
-                if(datePreset==="year") return d.getFullYear()===CY;
+                if(datePreset==="today") return d.toDateString()===now.toDateString();
                 if(datePreset==="custom"){
                   if(dateFrom && d < new Date(dateFrom)) return false;
                   if(dateTo   && d > new Date(dateTo))   return false;
@@ -624,7 +693,7 @@ function App(){
                   </div>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:10}}>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["year","This Year"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                      {[["7d","7D"],["30d","30D"],["90d","90D"],["180d","180D"],["ytd","YTD"],["today","Today"],["all","All"],["custom","Custom"]].map(([v,label])=>(
                         <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
                       ))}
                     </div>
@@ -664,7 +733,7 @@ function App(){
                           {rows.map((tx,i)=>(
                             <tr key={tx.id||i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
                               <td style={{padding:"12px 18px",color:"#64748b"}}>{tx.date}</td>
-                              <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}</td>
+                              <td style={{padding:"12px 18px",color:"#94a3b8",maxWidth:240,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.description}{tx.autoTagged&&<span style={{marginLeft:6,fontSize:10,color:"#a78bfa",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.2)",borderRadius:4,padding:"1px 5px"}}>⚡ auto</span>}</td>
                               <td style={{padding:"12px 18px"}} onClick={e=>{ e.stopPropagation(); setEditingCat(tx.id===editingCat?null:tx.id); }}>
                                 {editingCat===tx.id?(
                                   <CatDropdown value={tx.category} options={[...allCatsIn,...allCatsOut]}
@@ -756,8 +825,9 @@ function App(){
               if(datePreset==="7d")  return (now-d)<=7*86400000;
               if(datePreset==="30d") return (now-d)<=30*86400000;
               if(datePreset==="90d") return (now-d)<=90*86400000;
-              if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
-                if(datePreset==="year") return d.getFullYear()===CY;
+              if(datePreset==="180d") return (now-d)<=180*86400000;
+                if(datePreset==="ytd") return d.getFullYear()===now.getFullYear();
+                if(datePreset==="today") return d.toDateString()===now.toDateString();
               if(datePreset==="custom"){
                 if(dateFrom && d < new Date(dateFrom)) return false;
                 if(dateTo   && d > new Date(dateTo))   return false;
@@ -781,7 +851,7 @@ function App(){
               <div>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {[["7d","7D"],["30d","30D"],["90d","90D"],["ytd","YTD"],["year","This Year"],["all","All"],["custom","Custom"]].map(([v,label])=>(
+                    {[["7d","7D"],["30d","30D"],["90d","90D"],["180d","180D"],["ytd","YTD"],["today","Today"],["all","All"],["custom","Custom"]].map(([v,label])=>(
                       <button key={v} onClick={()=>setDatePreset(v)} style={{background:datePreset===v?"rgba(99,179,237,0.15)":"rgba(255,255,255,0.04)",border:datePreset===v?"1px solid rgba(99,179,237,0.4)":"1px solid rgba(255,255,255,0.1)",color:datePreset===v?"#63b3ed":"#64748b",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>{label}</button>
                     ))}
                   </div>
@@ -931,6 +1001,48 @@ function App(){
                   })()}
                 </div>
 
+
+                <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18,marginTop:16}}>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:4}}>Merchant Rules</div>
+                  <div style={{color:"#475569",fontSize:12,marginBottom:16}}>Transactions matching a keyword are auto-categorized. You can edit keywords before saving from the prompt.</div>
+                  <div style={{display:"flex",gap:8,marginBottom:14}}>
+                    <input value={ruleTestInput} onChange={e=>setRuleTestInput(e.target.value)} placeholder="Test a keyword — see matching transactions…" style={{...IS,flex:1,fontSize:12}}/>
+                  </div>
+                  {ruleTestInput.trim()&&(
+                    <div style={{background:"rgba(167,139,250,0.05)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:8,padding:"10px 14px",marginBottom:14}}>
+                      <div style={{fontSize:11,color:"#a78bfa",marginBottom:8}}>Matching transactions ({includedTx.filter(t=>(t.description||"").toLowerCase().includes(ruleTestInput.toLowerCase().trim())).length})</div>
+                      {includedTx.filter(t=>(t.description||"").toLowerCase().includes(ruleTestInput.toLowerCase().trim())).slice(0,5).map((tx,i)=>(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#94a3b8",padding:"3px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                          <span>{tx.description}</span>
+                          <span style={{color:tx.amount>0?"#34d399":"#f87171"}}>{fmtSigned(tx.amount)}</span>
+                        </div>
+                      ))}
+                      {includedTx.filter(t=>(t.description||"").toLowerCase().includes(ruleTestInput.toLowerCase().trim())).length>5&&(
+                        <div style={{fontSize:11,color:"#475569",marginTop:6}}>+{includedTx.filter(t=>(t.description||"").toLowerCase().includes(ruleTestInput.toLowerCase().trim())).length-5} more</div>
+                      )}
+                    </div>
+                  )}
+                  {Object.keys(merchantRules).length===0?(
+                    <div style={{color:"#475569",fontSize:13}}>No rules yet — re-categorize a transaction to create one</div>
+                  ):(
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {Object.entries(merchantRules).map(([kw,cat])=>(
+                        <div key={kw} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 12px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <span style={{fontSize:11,color:"#a78bfa",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.2)",borderRadius:4,padding:"2px 7px"}}>⚡</span>
+                            <span style={{fontSize:13,color:"#94a3b8"}}>{kw}</span>
+                            <span style={{fontSize:11,color:"#475569"}}>→</span>
+                            <span style={{fontSize:13,color:"#e2e8f0"}}>{cat}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:11,color:"#475569"}}>{includedTx.filter(t=>(t.description||"").toLowerCase().includes(kw)).length} matches</span>
+                            <button onClick={()=>deleteRule(kw)} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:18,marginTop:16}}>
                   <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"#e2e8f0",marginBottom:16}}>Manage Categories</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
@@ -951,7 +1063,11 @@ function App(){
                         {allCatsOut.map(cat=>(
                           <div key={cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"7px 12px"}}>
                             <span style={{fontSize:13,color:"#94a3b8"}}>{cat}</span>
-                            <button onClick={()=>deleteCustomCat(cat,"expense")} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                            {LOCKED_CATS.includes(cat)?(
+                              <span style={{fontSize:11,color:"#475569",background:"rgba(255,255,255,0.05)",borderRadius:5,padding:"2px 8px"}}>locked</span>
+                            ):(
+                              <button onClick={()=>deleteCustomCat(cat,"expense")} style={{background:"rgba(248,113,113,0.1)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+                            )}
                           </div>
                         ))}
                       </div>

@@ -37,6 +37,7 @@ async function tellerFetch(urlPath, accessToken) {
   return res.json();
 }
 
+// GET /accounts — list accounts for one enrollment
 app.get("/accounts", async (req, res) => {
   try {
     const { accessToken } = req.query;
@@ -48,6 +49,40 @@ app.get("/accounts", async (req, res) => {
   }
 });
 
+// GET /balances — fetch live balances for all accounts in one enrollment
+app.get("/balances", async (req, res) => {
+  try {
+    const { accessToken } = req.query;
+    if (!accessToken) return res.status(400).json({ error: "accessToken required" });
+
+    const accounts = await tellerFetch("/accounts", accessToken);
+    const results = [];
+
+    for (const acct of accounts) {
+      try {
+        const bal = await tellerFetch(`/accounts/${acct.id}/balances`, accessToken);
+        results.push({
+          accountId:   acct.id,
+          accountName: acct.name,
+          type:        acct.type,
+          subtype:     acct.subtype,
+          institution: acct.institution?.name || "",
+          lastFour:    acct.last_four || "",
+          available:   parseFloat(bal.available  || 0),
+          ledger:      parseFloat(bal.ledger     || 0),
+        });
+      } catch (_) {
+        // skip accounts that don't support balances
+      }
+    }
+
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /transactions — fetch + categorize across all accounts in one enrollment
 app.get("/transactions", async (req, res) => {
   try {
     const { accessToken } = req.query;
@@ -82,21 +117,11 @@ app.get("/transactions", async (req, res) => {
   }
 });
 
-app.get("/debug-cert", (_, res) => {
-  const cert = process.env.TELLER_CERT || "";
-  const key  = process.env.TELLER_PRIVATE_KEY || "";
-  res.json({
-    certLength:    cert.length,
-    certNewlines:  (cert.match(/\n/g) || []).length,
-    certFirst50:   cert.substring(0, 50),
-    keyLength:     key.length,
-    keyNewlines:   (key.match(/\n/g) || []).length,
-    keyFirst50:    key.substring(0, 50),
-  });
-});
-
+// Serve frontend
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/", (_, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+
+// Health check
 app.get("/health", (_, res) => res.json({ ok: true }));
 
 function mapCategory(tellerCategory, amount, description) {
